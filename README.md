@@ -1,4 +1,4 @@
-# # Trail Conditions Checker
+# Trail Conditions Checker
 
 ## Team name, members, and roles
 
