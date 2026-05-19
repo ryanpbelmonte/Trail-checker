@@ -14,7 +14,7 @@
 // Uncomment the code below to enable the fix. Try it both ways — with the
 // fix and without — to feel the difference.
 
-/*
+
 document.querySelectorAll("form[data-disable-on-submit]").forEach(form => {
     form.addEventListener("submit", () => {
         const button = form.querySelector("button[type='submit']");
@@ -24,4 +24,4 @@ document.querySelectorAll("form[data-disable-on-submit]").forEach(form => {
         }
     });
 });
-*/
+
