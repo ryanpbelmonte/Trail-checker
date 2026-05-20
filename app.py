@@ -1,26 +1,46 @@
 """
-Course 506 Week 5 Skeleton — Flask + Postgres + SQLModel + Bootstrap
+Course 506 Week 6 — Trail Checker (DB-and-security slice implemented)
 
-Single-file Flask app demonstrating the architecture of a web application:
-- Server (Flask) handles HTTP requests
-- Database (Postgres via SQLModel) stores user state across requests
-- Sessions (Flask sessions) keep users logged in across requests
-- Templates render HTML to send back to the browser
+Flask + Postgres + SQLModel + Flask-Login + Flask-WTF + Flask-Limiter.
 
 The home page serves the static site you sync from your S3 bucket into
 S3_content/. Login, register, logout, and about are Flask-rendered routes.
-
-This file is meant to be readable top-to-bottom. No Blueprints, no app factory,
-no advanced Flask patterns. Just enough to teach the architecture.
+Saved trail routes are protected by Flask-Login and enforce ownership at
+the database query level.
 """
 
+import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
+
 from flask import (
     Flask, render_template, request, redirect, url_for, session, flash, g,
     send_from_directory, abort, jsonify,
 )
+from flask_login import (
+    LoginManager,
+    UserMixin,
+    login_user,
+    logout_user,
+    current_user,
+    login_required,
+)
+from flask_wtf.csrf import CSRFProtect, CSRFError
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    event,
+)
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 from werkzeug.security import generate_password_hash, check_password_hash
 from weather_service import (
@@ -30,48 +50,186 @@ from weather_service import (
     get_conditions_for_query,
 )
 
-# ---------------------------------------------------------------------------
-# Application setup
-# ---------------------------------------------------------------------------
+
+TESTING = os.environ.get("TESTING") == "1"
+
 
 app = Flask(__name__)
 
-# Secret key signs the session cookie so users can't tamper with it.
-# In production this comes from an environment variable and is a long random string.
+
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-not-for-production")
 
-# Database URL. Postgres runs in a separate container; the URL points there.
-# For local testing without Docker, override with sqlite:
-#   DATABASE_URL=sqlite:///dev.db python app.py
+
+if (
+    not TESTING
+    and not app.debug
+    and app.config["SECRET_KEY"] == "dev-secret-not-for-production"
+):
+    raise RuntimeError(
+        "SECRET_KEY must be set to a non-default value when running outside "
+        "of debug/testing mode. Set SECRET_KEY in the environment."
+    )
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=not (app.debug or TESTING),
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE="Lax",
+    REMEMBER_COOKIE_SECURE=not (app.debug or TESTING),
+    WTF_CSRF_ENABLED=not TESTING,
+    WTF_CSRF_TIME_LIMIT=3600,
+)
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://app:app@db:5432/app")
 
-# SQLModel uses SQLAlchemy underneath. The engine is the connection pool.
 engine = create_engine(DATABASE_URL, echo=False)
 
-# Path to the synced S3 content. Students populate this with `aws s3 sync`.
+
+@event.listens_for(engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    """Force SQLite connections to enforce foreign keys.
+
+    Postgres enforces FK + ondelete clauses by default, but SQLite does not
+    unless the pragma is set per connection. Without this, FK + CASCADE
+    behavior silently passes in tests while real production would catch it
+    or vice versa. Aligning the two dialects keeps the contract test bed
+    honest.
+    """
+    if engine.dialect.name == "sqlite":
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
 S3_CONTENT_DIR = Path(__file__).parent / "S3_content"
 
 
-# ---------------------------------------------------------------------------
-# Database model
-# ---------------------------------------------------------------------------
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login"
 
-class User(SQLModel, table=True):
+csrf = CSRFProtect(app)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    enabled=not TESTING,
+)
+
+
+audit_logger = logging.getLogger("trail_checker.audit")
+audit_logger.setLevel(logging.INFO)
+if not audit_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(
+        logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+    )
+    audit_logger.addHandler(_handler)
+
+
+def audit(event: str, **fields):
+    """Structured audit log for state-changing events. Never log secrets."""
+    payload = " ".join(f"{key}={value}" for key, value in fields.items())
+    audit_logger.info("event=%s %s", event, payload)
+
+
+MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 128
+PASSWORD_RE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d).{8,128}$")
+
+_DUMMY_PASSWORD_HASH = generate_password_hash("not-a-real-password")
+
+
+class User(UserMixin, SQLModel, table=True):
     __tablename__ = "users"
 
     id: int | None = Field(default=None, primary_key=True)
-    username: str = Field(unique=True, index=True, max_length=80)
-    password_hash: str = Field(max_length=255)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    username: str = Field(
+        sa_column=Column(String(80), nullable=False, unique=True, index=True),
+    )
+    password_hash: str = Field(sa_column=Column(String(255), nullable=False))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
 
 
-# ---------------------------------------------------------------------------
-# Session helper
-#
-# SQLModel doesn't have a Flask extension. We open a fresh DB session for each
-# request and close it when the request finishes. Flask's `g` object holds
-# request-scoped state.
-# ---------------------------------------------------------------------------
+class SavedTrail(SQLModel, table=True):
+    __tablename__ = "saved_trails"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "latitude",
+            "longitude",
+            name="uq_saved_trails_user_lat_lon",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    display_name: str = Field(sa_column=Column(String(100), nullable=False))
+    query_text: str = Field(sa_column=Column(String(100), nullable=False))
+    latitude: float = Field(sa_column=Column(Float, nullable=False))
+    longitude: float = Field(sa_column=Column(Float, nullable=False))
+    country: str | None = Field(
+        default=None, sa_column=Column(String(10), nullable=True)
+    )
+    state: str | None = Field(
+        default=None, sa_column=Column(String(100), nullable=True)
+    )
+    notes: str | None = Field(
+        default=None, sa_column=Column(String(500), nullable=True)
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class TrailCheck(SQLModel, table=True):
+    __tablename__ = "trail_checks"
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    query_text: str = Field(sa_column=Column(String(100), nullable=False))
+    resolved_name: str = Field(sa_column=Column(String(100), nullable=False))
+    latitude: float = Field(sa_column=Column(Float, nullable=False))
+    longitude: float = Field(sa_column=Column(Float, nullable=False))
+    weather_main: str = Field(sa_column=Column(String(50), nullable=False))
+    weather_description: str = Field(sa_column=Column(String(100), nullable=False))
+    temp_f: float = Field(sa_column=Column(Float, nullable=False))
+    feels_like_f: float | None = None
+    humidity: int | None = None
+    wind_mph: float | None = None
+    visibility_meters: int | None = None
+    aqi: int | None = None
+    pm2_5: float | None = None
+    pm10: float | None = None
+    recommendation: str = Field(sa_column=Column(String(20), nullable=False))
+    checked_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
 
 def get_db_session():
     if "db_session" not in g:
@@ -86,28 +244,69 @@ def close_db_session(exception=None):
         db_session.close()
 
 
-# Make `user` available in every Flask-rendered template (login page, register
-# page, about page, placeholder). Static files served from S3_content/ don't
-# go through templates, so this only affects Jinja2-rendered pages.
+@login_manager.user_loader
+def load_user(user_id: str):
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    db = get_db_session()
+    return db.get(User, user_id_int)
+
+
 @app.context_processor
 def inject_user():
-    user = None
-    if "user_id" in session:
-        db = get_db_session()
-        user = db.get(User, session["user_id"])
-    return {"user": user}
+    return {
+        "user": current_user if current_user.is_authenticated else None,
+    }
 
 
-# ---------------------------------------------------------------------------
-# Routes — your S3 static site
-#
-# Your S3 site lives at /site/. Populate the S3_content/ folder by running:
-#   aws s3 sync s3://<your-bucket>/ S3_content/
-# from the repo root. Then click "My Site" in the navbar.
-#
-# The home page is Flask-rendered and acts as the entry point: it has the
-# navbar (Login/Register/About/My Site) and a brief landing message.
-# ---------------------------------------------------------------------------
+@app.errorhandler(CSRFError)
+def handle_csrf_error(error):
+    """Anonymous CSRF failures should look the same as @login_required denials.
+
+    This keeps the e2e walk's step 8 assertion clean: every anonymous
+    state-changing request lands at /login regardless of which gate fired.
+    """
+    if not current_user.is_authenticated:
+        return redirect(url_for("login"))
+    flash("Your session expired. Please try again.")
+    return redirect(request.referrer or url_for("home"))
+
+
+def validate_text(value: str | None, min_len: int, max_len: int, field_name: str) -> str:
+    cleaned = (value or "").strip()
+    if len(cleaned) < min_len or len(cleaned) > max_len:
+        raise ValueError(f"Invalid {field_name}")
+    return cleaned
+
+
+def validate_optional_text(value: str | None, max_len: int, field_name: str) -> str | None:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > max_len:
+        raise ValueError(f"Invalid {field_name}")
+    return cleaned
+
+
+def validate_float(value: str | None, min_value: float, max_value: float, field_name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid {field_name}")
+    if parsed < min_value or parsed > max_value:
+        raise ValueError(f"Invalid {field_name}")
+    return parsed
+
+
+def validate_password_policy(password: str) -> None:
+    if PASSWORD_RE.fullmatch(password or "") is None:
+        raise ValueError(
+            f"Password must be {MIN_PASSWORD_LENGTH}-{MAX_PASSWORD_LENGTH} "
+            "characters and include both letters and a digit."
+        )
+
 
 @app.route("/")
 def home():
@@ -118,7 +317,6 @@ def home():
 def site_home():
     index_path = S3_CONTENT_DIR / "index.html"
     if not index_path.exists():
-        # Friendly placeholder when the student hasn't synced yet.
         return render_template("placeholder.html"), 200
     return send_from_directory(S3_CONTENT_DIR, "index.html")
 
@@ -131,21 +329,22 @@ def serve_s3_content(filename):
     return send_from_directory(S3_CONTENT_DIR, filename)
 
 
-# ---------------------------------------------------------------------------
-# Routes — authentication (Flask-rendered, not static)
-# ---------------------------------------------------------------------------
-
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "GET":
         return render_template("register.html")
 
-    # POST: create a new user.
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
 
     if not username or not password:
         flash("Username and password are required.")
+        return redirect(url_for("register"))
+
+    try:
+        validate_password_policy(password)
+    except ValueError as error:
+        flash(str(error))
         return redirect(url_for("register"))
 
     db = get_db_session()
@@ -162,50 +361,60 @@ def register():
     db.commit()
     db.refresh(user)
 
-    # Log them in immediately after registration.
-    session["user_id"] = user.id
+    login_user(user)
+    audit(
+        "user.register",
+        user_id=user.id,
+        username=username,
+        ip=request.remote_addr,
+    )
     return redirect(url_for("home"))
 
 
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def login():
     if request.method == "GET":
         return render_template("login.html")
 
-    # POST: validate credentials.
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
 
     db = get_db_session()
     user = db.exec(select(User).where(User.username == username)).first()
 
-    if user is None or not check_password_hash(user.password_hash, password):
+    if user is None:
+        check_password_hash(_DUMMY_PASSWORD_HASH, password)
+        audit("user.login.failure", username=username, ip=request.remote_addr)
         flash("Invalid username or password.")
         return redirect(url_for("login"))
 
-    # Set the session. The browser will receive a cookie that's a signed
-    # version of {"user_id": <id>}. On every subsequent request, the
-    # browser sends this cookie; Flask validates the signature and gives
-    # us back the user_id.
-    session["user_id"] = user.id
+    if not check_password_hash(user.password_hash, password):
+        audit("user.login.failure", username=username, ip=request.remote_addr)
+        flash("Invalid username or password.")
+        return redirect(url_for("login"))
+
+    login_user(user)
+    audit("user.login.success", user_id=user.id, ip=request.remote_addr)
     return redirect(url_for("home"))
 
 
 @app.route("/logout", methods=["POST"])
+@login_required
 def logout():
-    session.pop("user_id", None)
+    user_id = current_user.id
+    logout_user()
+    audit("user.logout", user_id=user_id, ip=request.remote_addr)
     return redirect(url_for("home"))
 
 
 @app.route("/about")
 def about():
-    # Each team replaces this content with their own About page (see
-    # the assignment instructions in README.md).
     return render_template("about.html")
 
 
 # ---------------------------------------------------------------------------
-# Routes — Trail Checker API
+# Routes — Trail Checker
 # ---------------------------------------------------------------------------
 
 def _json_error(code: str, message: str, status: int):
@@ -307,17 +516,175 @@ def api_conditions():
 
 
 # ---------------------------------------------------------------------------
-# First-run schema creation
+# Routes — Saved trails
 # ---------------------------------------------------------------------------
 
-# In production you'd use a migration tool (Alembic) instead.
-# For Week 5, this is enough — it creates tables if they don't exist.
+@app.route("/saved-trails", methods=["GET"])
+@login_required
+def saved_trails():
+    db = get_db_session()
+    trails = db.exec(
+        select(SavedTrail)
+        .where(SavedTrail.user_id == current_user.id)
+        .order_by(SavedTrail.created_at.desc())
+    ).all()
+
+    prior_input = session.pop("saved_trail_form", None)
+    return render_template(
+        "saved_trails.html",
+        saved_trails=trails,
+        prior_input=prior_input,
+    )
+
+
+@app.route("/saved-trails", methods=["POST"])
+@login_required
+def create_saved_trail():
+    form = request.form
+
+    # Every form field is treated as untrusted input even when it appears to
+    # come from our own results page. Validate, do not infer.
+    try:
+        display_name = validate_text(form.get("display_name"), 2, 100, "display_name")
+        query_text = validate_text(form.get("query_text"), 2, 100, "query_text")
+        latitude = validate_float(form.get("latitude"), -90, 90, "latitude")
+        longitude = validate_float(form.get("longitude"), -180, 180, "longitude")
+        country = validate_optional_text(form.get("country"), 10, "country")
+        state = validate_optional_text(form.get("state"), 100, "state")
+        notes = validate_optional_text(form.get("notes"), 500, "notes")
+    except ValueError as error:
+        flash(str(error))
+        session["saved_trail_form"] = {
+            "display_name": form.get("display_name", ""),
+            "query_text": form.get("query_text", ""),
+            "latitude": form.get("latitude", ""),
+            "longitude": form.get("longitude", ""),
+            "country": form.get("country", ""),
+            "state": form.get("state", ""),
+            "notes": form.get("notes", ""),
+        }
+        return redirect(url_for("saved_trails"))
+
+    db = get_db_session()
+    existing = db.exec(
+        select(SavedTrail).where(
+            SavedTrail.user_id == current_user.id,
+            SavedTrail.latitude == latitude,
+            SavedTrail.longitude == longitude,
+        )
+    ).first()
+
+    if existing is not None:
+        flash("That trail is already saved.")
+        return redirect(url_for("saved_trails"))
+
+    trail = SavedTrail(
+        user_id=current_user.id,
+        display_name=display_name,
+        query_text=query_text,
+        latitude=latitude,
+        longitude=longitude,
+        country=country,
+        state=state,
+        notes=notes,
+    )
+    db.add(trail)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        audit(
+            "saved_trail.create.duplicate",
+            user_id=current_user.id,
+            latitude=latitude,
+            longitude=longitude,
+        )
+        flash("That trail is already saved.")
+        return redirect(url_for("saved_trails"))
+
+    db.refresh(trail)
+    audit(
+        "saved_trail.create",
+        user_id=current_user.id,
+        trail_id=trail.id,
+    )
+    flash("Trail saved.")
+    return redirect(url_for("saved_trails"))
+
+
+@app.route("/saved-trails/<int:trail_id>/delete", methods=["POST"])
+@login_required
+def delete_saved_trail(trail_id: int):
+    db = get_db_session()
+    trail = db.exec(
+        select(SavedTrail).where(
+            SavedTrail.id == trail_id,
+            SavedTrail.user_id == current_user.id,
+        )
+    ).first()
+
+    # Touch users table the same way every time to keep timing uniform
+    # between owner, non-owner, and missing-id cases.
+    db.get(User, current_user.id)
+
+    if trail is None:
+        audit(
+            "saved_trail.delete.denied",
+            actor_id=current_user.id,
+            target_trail_id=trail_id,
+        )
+        abort(404)
+
+    db.delete(trail)
+    db.commit()
+    audit(
+        "saved_trail.delete",
+        user_id=current_user.id,
+        trail_id=trail_id,
+    )
+    flash("Saved trail deleted.")
+    return redirect(url_for("saved_trails"))
+
+
+@app.route("/saved-trails/<int:trail_id>/check", methods=["GET"])
+@login_required
+def check_saved_trail(trail_id: int):
+    db = get_db_session()
+    trail = db.exec(
+        select(SavedTrail).where(
+            SavedTrail.id == trail_id,
+            SavedTrail.user_id == current_user.id,
+        )
+    ).first()
+
+    db.get(User, current_user.id)
+
+    if trail is None:
+        audit(
+            "saved_trail.check.denied",
+            actor_id=current_user.id,
+            target_trail_id=trail_id,
+        )
+        abort(404)
+
+    # Server-side (Ryan) owns the live OpenWeather fetch. Until that lands,
+    # render the saved trail data so the route is reachable and ownership
+    # behavior is testable end-to-end.
+    return render_template(
+        "trail_results.html",
+        query_text=trail.query_text,
+        resolved_name=trail.display_name,
+        latitude=trail.latitude,
+        longitude=trail.longitude,
+        recommendation="unknown",
+        is_saved=True,
+        saved_trail=trail,
+    )
+
+
 SQLModel.metadata.create_all(engine)
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
