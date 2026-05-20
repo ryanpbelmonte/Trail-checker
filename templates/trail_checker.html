@@ -1,26 +1,82 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8">
-        <h1 class="mb-3">Trail Checker</h1>
-        <p class="text-muted">
-            Search for a trailhead or outdoor location to see current weather and air quality.
-        </p>
+<section class="py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-9">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-4 p-md-5">
+                    <span class="badge text-bg-success mb-3">Trail Checker</span>
 
-        <form method="GET" action="/trail-checker/results" class="mb-4">
-            <div class="input-group">
-                <input
-                    type="text"
-                    name="q"
-                    class="form-control"
-                    placeholder="e.g. Mount Rainier"
-                    value="{{ query_text or '' }}"
-                    required
-                >
-                <button type="submit" class="btn btn-primary">Check conditions</button>
+                    <h1 class="display-6 fw-bold mb-3">Check trail conditions before you go</h1>
+
+                    <p class="lead text-muted mb-4">
+                        Search for a trailhead, park, mountain, or outdoor location to see current
+                        weather, air quality, and a simple readiness recommendation.
+                    </p>
+
+                    <form method="GET" action="/trail-checker/results" class="mb-4">
+                        <label for="trail-search" class="form-label fw-semibold">
+                            Location or trailhead
+                        </label>
+
+                        <div class="input-group input-group-lg">
+                            <input
+                                id="trail-search"
+                                type="text"
+                                name="q"
+                                class="form-control"
+                                placeholder="e.g. Mount Rainier"
+                                value="{{ query_text or '' }}"
+                                minlength="2"
+                                maxlength="100"
+                                required
+                            >
+                            <button type="submit" class="btn btn-primary">
+                                Check conditions
+                            </button>
+                        </div>
+
+                        <div class="form-text">
+                            Try a specific outdoor location for the most useful result.
+                        </div>
+                    </form>
+
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="border rounded-3 p-3 h-100 bg-light">
+                                <h2 class="h6 fw-bold">Weather</h2>
+                                <p class="small text-muted mb-0">
+                                    Temperature, wind, visibility, and current conditions.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <div class="border rounded-3 p-3 h-100 bg-light">
+                                <h2 class="h6 fw-bold">Air quality</h2>
+                                <p class="small text-muted mb-0">
+                                    AQI and particle data when available from OpenWeather.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <div class="border rounded-3 p-3 h-100 bg-light">
+                                <h2 class="h6 fw-bold">Recommendation</h2>
+                                <p class="small text-muted mb-0">
+                                    A quick Good, Caution, Poor, or Unknown summary.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </form>
+
+            <p class="text-muted small mt-3 mb-0">
+                Trail Checker is a planning helper, not an official trail closure or safety source.
+            </p>
+        </div>
     </div>
-</div>
+</section>
 {% endblock %}
