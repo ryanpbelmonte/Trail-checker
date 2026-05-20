@@ -158,19 +158,63 @@ def compute_recommendation(weather: dict, air_quality: dict | None) -> str:
     return "unknown"
 
 
-def get_conditions_for_query(query_text: str) -> dict:
-    api_key = get_api_key()
-    location = geocode(query_text, api_key)
-    weather = fetch_weather(location["latitude"], location["longitude"], api_key)
-    air_quality = fetch_air_quality(location["latitude"], location["longitude"], api_key)
+def _build_conditions_payload(
+    query_text: str,
+    resolved_name: str,
+    latitude: float,
+    longitude: float,
+    api_key: str,
+    country: str | None = None,
+    state: str | None = None,
+) -> dict:
+    """Fetch weather/AQI and build the shared conditions dict."""
+    weather = fetch_weather(latitude, longitude, api_key)
+    air_quality = fetch_air_quality(latitude, longitude, api_key)
     recommendation = compute_recommendation(weather, air_quality)
 
     return {
         "query_text": query_text,
-        "resolved_name": location["resolved_name"],
-        "latitude": location["latitude"],
-        "longitude": location["longitude"],
+        "resolved_name": resolved_name,
+        "latitude": latitude,
+        "longitude": longitude,
+        "country": country,
+        "state": state,
         "weather": weather,
         "air_quality": air_quality or {},
         "recommendation": recommendation,
     }
+
+
+def get_conditions_for_query(query_text: str) -> dict:
+    api_key = get_api_key()
+    location = geocode(query_text, api_key)
+    return _build_conditions_payload(
+        query_text,
+        location["resolved_name"],
+        location["latitude"],
+        location["longitude"],
+        api_key,
+        country=location.get("country"),
+        state=location.get("state"),
+    )
+
+
+def get_conditions_for_coordinates(
+    query_text: str,
+    resolved_name: str,
+    latitude: float,
+    longitude: float,
+    country: str | None = None,
+    state: str | None = None,
+) -> dict:
+    """Fetch live conditions for known coordinates (saved-trail re-check)."""
+    api_key = get_api_key()
+    return _build_conditions_payload(
+        query_text,
+        resolved_name,
+        latitude,
+        longitude,
+        api_key,
+        country=country,
+        state=state,
+    )
