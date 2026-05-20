@@ -76,7 +76,7 @@ def test_register_rejects_duplicate_username(client):
     client.post("/logout")
     response = client.post(
         "/register",
-        data={"username": "bob", "password": "different"},
+        data={"username": "bob", "password": "different1"},
         follow_redirects=True,
     )
     assert b"already taken" in response.data
@@ -84,30 +84,28 @@ def test_register_rejects_duplicate_username(client):
 
 def test_login_with_wrong_password_shows_invalid(client):
     """Wrong password shows the 'Invalid' flash on the login page."""
-    client.post("/register", data={"username": "dave", "password": "secret"})
+    client.post("/register", data={"username": "dave", "password": "secret123"})
     client.post("/logout")
 
     response = client.post(
         "/login",
-        data={"username": "dave", "password": "wrong"},
+        data={"username": "dave", "password": "wrongpass1"},
         follow_redirects=True,
     )
     assert b"Invalid" in response.data
 
 
 def test_login_redirects_home_with_session(client):
-    """A successful login redirects to / and sets the session cookie."""
-    client.post("/register", data={"username": "carol", "password": "secret"})
+    """A successful login redirects to / and sets the Flask-Login session."""
+    client.post("/register", data={"username": "carol", "password": "secret123"})
     client.post("/logout")
 
     response = client.post(
         "/login",
-        data={"username": "carol", "password": "secret"},
+        data={"username": "carol", "password": "secret123"},
     )
-    # 302 redirect to home
     assert response.status_code == 302
     assert response.location.endswith("/")
 
-    # Session is set
     with client.session_transaction() as sess:
-        assert "user_id" in sess
+        assert "_user_id" in sess
