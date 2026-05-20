@@ -64,6 +64,12 @@
             <input type="hidden" name="query_text" value="{{ query_text }}">
             <input type="hidden" name="latitude" value="{{ latitude }}">
             <input type="hidden" name="longitude" value="{{ longitude }}">
+            {% if country %}
+            <input type="hidden" name="country" value="{{ country }}">
+            {% endif %}
+            {% if state %}
+            <input type="hidden" name="state" value="{{ state }}">
+            {% endif %}
             <button type="submit" class="btn btn-outline-primary">Save this location</button>
         </form>
         {% endif %}

@@ -238,6 +238,8 @@ def _results_context_from_data(data: dict, is_saved: bool = False) -> dict:
         "pm2_5": air_quality.get("pm2_5"),
         "pm10": air_quality.get("pm10"),
         "recommendation": data.get("recommendation", "unknown"),
+        "country": data.get("country"),
+        "state": data.get("state"),
         "is_saved": is_saved,
     }
 
