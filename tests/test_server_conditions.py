@@ -17,8 +17,8 @@ os.environ["OPENWEATHER_API_KEY"] = "fake-test-key"
 
 import pytest
 import responses
-from sqlmodel import SQLModel
-from app import app, engine
+from sqlmodel import SQLModel, Session, select
+from app import SavedTrail, TrailCheck, app, engine
 
 
 @pytest.fixture
@@ -32,24 +32,23 @@ def client():
         yield client
 
 
-@responses.activate
-def test_api_conditions_returns_weather_air_quality_and_recommendation(client):
-    """A valid query returns the agreed JSON envelope and condition fields."""
-    responses.add(
-        responses.GET,
-        "http://api.openweathermap.org/geo/1.0/direct",
-        json=[
-            {
-                "name": "Mount Rainier",
-                "lat": 46.8523,
-                "lon": -121.7603,
-                "country": "US",
-                "state": "Washington",
-            }
-        ],
-        status=200,
-    )
-
+def add_openweather_responses(include_geocode=True):
+    """Register the standard successful OpenWeather response set."""
+    if include_geocode:
+        responses.add(
+            responses.GET,
+            "http://api.openweathermap.org/geo/1.0/direct",
+            json=[
+                {
+                    "name": "Mount Rainier",
+                    "lat": 46.8523,
+                    "lon": -121.7603,
+                    "country": "US",
+                    "state": "Washington",
+                }
+            ],
+            status=200,
+        )
     responses.add(
         responses.GET,
         "https://api.openweathermap.org/data/2.5/weather",
@@ -76,6 +75,12 @@ def test_api_conditions_returns_weather_air_quality_and_recommendation(client):
         },
         status=200,
     )
+
+
+@responses.activate
+def test_api_conditions_returns_weather_air_quality_and_recommendation(client):
+    """A valid query returns the agreed JSON envelope and condition fields."""
+    add_openweather_responses()
 
     response = client.get("/api/conditions?q=Mount%20Rainier")
 
@@ -113,3 +118,72 @@ def test_api_conditions_returns_not_found_for_empty_geocoding_result(client):
     payload = response.get_json()
     assert payload["ok"] is False
     assert payload["error"]["code"] == "not_found"
+
+
+@responses.activate
+def test_results_page_persists_trail_check_for_anonymous_search(client):
+    """Successful HTML searches create trail_checks audit rows."""
+    add_openweather_responses()
+
+    response = client.get("/trail-checker/results?q=Mount%20Rainier")
+
+    assert response.status_code == 200
+    with Session(engine) as db:
+        rows = db.exec(select(TrailCheck)).all()
+
+    assert len(rows) == 1
+    assert rows[0].user_id is None
+    assert rows[0].query_text == "Mount Rainier"
+    assert rows[0].resolved_name == "Mount Rainier"
+    assert rows[0].recommendation == "good"
+
+
+@responses.activate
+def test_results_page_marks_existing_saved_trail(client):
+    """Logged-in users see already-saved state for matching coordinates."""
+    client.post("/register", data={"username": "hiker", "password": "password123"})
+    client.post(
+        "/saved-trails",
+        data={
+            "display_name": "Mount Rainier",
+            "query_text": "Mount Rainier",
+            "latitude": "46.8523",
+            "longitude": "-121.7603",
+        },
+    )
+    add_openweather_responses()
+
+    response = client.get("/trail-checker/results?q=Mount%20Rainier")
+
+    assert response.status_code == 200
+    assert b"This location is already saved." in response.data
+
+
+@responses.activate
+def test_saved_trail_recheck_uses_coordinates_without_geocoding(client):
+    """Saved-trail recheck uses stored lat/lon and skips geocoding."""
+    client.post("/register", data={"username": "hiker", "password": "password123"})
+    client.post(
+        "/saved-trails",
+        data={
+            "display_name": "Mount Rainier",
+            "query_text": "Mount Rainier",
+            "latitude": "46.8523",
+            "longitude": "-121.7603",
+            "country": "US",
+            "state": "Washington",
+        },
+    )
+    add_openweather_responses(include_geocode=False)
+
+    response = client.get("/saved-trails/1/check")
+
+    assert response.status_code == 200
+    assert b'data-testid="weather-card"' in response.data
+    assert b"This location is already saved." in response.data
+    assert len(responses.calls) == 2
+    assert all("geo/1.0/direct" not in call.request.url for call in responses.calls)
+
+    with Session(engine) as db:
+        saved = db.exec(select(SavedTrail)).first()
+    assert saved is not None

@@ -47,6 +47,7 @@ from weather_service import (
     GeocodeNotFoundError,
     ExternalAPIError,
     ExternalAPIUnavailableError,
+    get_conditions_for_coordinates,
     get_conditions_for_query,
 )
 
@@ -453,6 +454,56 @@ def _results_context_from_data(data: dict, is_saved: bool = False) -> dict:
     }
 
 
+def _current_user_id_or_none() -> int | None:
+    if current_user.is_authenticated:
+        return current_user.id
+    return None
+
+
+def _is_saved_trail(
+    db: Session,
+    user_id: int | None,
+    latitude: float,
+    longitude: float,
+) -> bool:
+    if user_id is None:
+        return False
+    return db.exec(
+        select(SavedTrail).where(
+            SavedTrail.user_id == user_id,
+            SavedTrail.latitude == latitude,
+            SavedTrail.longitude == longitude,
+        )
+    ).first() is not None
+
+
+def _create_trail_check(db: Session, data: dict, user_id: int | None) -> TrailCheck:
+    weather = data.get("weather") or {}
+    air_quality = data.get("air_quality") or {}
+    trail_check = TrailCheck(
+        user_id=user_id,
+        query_text=data["query_text"],
+        resolved_name=data["resolved_name"],
+        latitude=data["latitude"],
+        longitude=data["longitude"],
+        weather_main=weather["main"],
+        weather_description=weather["description"],
+        temp_f=weather["temp_f"],
+        feels_like_f=weather.get("feels_like_f"),
+        humidity=weather.get("humidity"),
+        wind_mph=weather.get("wind_mph"),
+        visibility_meters=weather.get("visibility_meters"),
+        aqi=air_quality.get("aqi"),
+        pm2_5=air_quality.get("pm2_5"),
+        pm10=air_quality.get("pm10"),
+        recommendation=data.get("recommendation", "unknown"),
+    )
+    db.add(trail_check)
+    db.commit()
+    db.refresh(trail_check)
+    return trail_check
+
+
 def _render_trail_checker_error(message: str, query_text: str = ""):
     flash(message)
     return render_template("trail_checker.html", query_text=query_text)
@@ -490,10 +541,15 @@ def trail_checker_results():
             query_text,
         )
 
+    db = get_db_session()
+    user_id = _current_user_id_or_none()
+    is_saved = _is_saved_trail(db, user_id, data["latitude"], data["longitude"])
+    _create_trail_check(db, data, user_id)
+
     return render_template(
         "trail_results.html",
         title=f"Trail Checker — {data['resolved_name']}",
-        **_results_context_from_data(data),
+        **_results_context_from_data(data, is_saved=is_saved),
     )
 
 
@@ -668,18 +724,27 @@ def check_saved_trail(trail_id: int):
         )
         abort(404)
 
-    # Server-side (Ryan) owns the live OpenWeather fetch. Until that lands,
-    # render the saved trail data so the route is reachable and ownership
-    # behavior is testable end-to-end.
+    try:
+        data = get_conditions_for_coordinates(
+            trail.query_text,
+            trail.display_name,
+            trail.latitude,
+            trail.longitude,
+            country=trail.country,
+            state=trail.state,
+        )
+    except ExternalAPIError:
+        flash("Weather data was malformed. Try again later.")
+        return redirect(url_for("saved_trails"))
+    except ExternalAPIUnavailableError:
+        flash("External weather service is unavailable. Try again later.")
+        return redirect(url_for("saved_trails"))
+
     return render_template(
         "trail_results.html",
-        query_text=trail.query_text,
-        resolved_name=trail.display_name,
-        latitude=trail.latitude,
-        longitude=trail.longitude,
-        recommendation="unknown",
-        is_saved=True,
+        title=f"Trail Checker — {trail.display_name}",
         saved_trail=trail,
+        **_results_context_from_data(data, is_saved=True),
     )
 
 
