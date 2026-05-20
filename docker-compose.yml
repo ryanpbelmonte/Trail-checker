@@ -16,13 +16,16 @@ services:
     ports:
       - "5000:5000"
     environment:
+      # DATABASE_URL is non-secret and benefits from being explicit. Secrets
+      # (SECRET_KEY, OPENWEATHER_API_KEY, etc.) come from .env only so they
+      # are not committed in docker-compose.yml.
       DATABASE_URL: postgresql://app:app@db:5432/app
-      SECRET_KEY: dev-secret-not-for-production
     env_file:
-      # Optional override file; gitignored. The defaults above work
-      # for development. See .env.example for the template.
+      # .env is gitignored and is the single source of truth for secrets.
+      # The stack refuses to start if it is missing — see .env.example for
+      # the template and README.md for required variables.
       - path: .env
-        required: false
+        required: true
     depends_on:
       db:
         condition: service_healthy

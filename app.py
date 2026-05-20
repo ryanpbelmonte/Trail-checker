@@ -67,8 +67,12 @@ if (
     and app.config["SECRET_KEY"] == "dev-secret-not-for-production"
 ):
     raise RuntimeError(
-        "SECRET_KEY must be set to a non-default value when running outside "
-        "of debug/testing mode. Set SECRET_KEY in the environment."
+        "SECRET_KEY is unset or still the default placeholder.\n"
+        "  1. Copy .env.example to .env:   cp .env.example .env\n"
+        "  2. Set SECRET_KEY in .env to a long random string.\n"
+        "     (e.g. python -c \"import secrets; print(secrets.token_urlsafe(48))\")\n"
+        "  3. Make sure the SECRET_KEY line is NOT commented out.\n"
+        "See README.md -> 'Required environment variables' for the full list."
     )
 
 app.config.update(
