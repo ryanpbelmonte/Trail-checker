@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10">
+        <h1 class="mb-3">Conditions for {{ resolved_name }}</h1>
+        <p class="text-muted">Search: {{ query_text }}</p>
+
+        <div class="mb-3" data-testid="recommendation-badge">
+            <span class="badge text-bg-secondary">{{ recommendation|title }}</span>
+        </div>
+
+        <div class="row g-4">
+            <div class="col-md-6">
+                <div class="card" data-testid="weather-card">
+                    <div class="card-header">Weather</div>
+                    <div class="card-body">
+                        <p class="mb-1"><strong>{{ weather_main }}</strong> — {{ weather_description }}</p>
+                        <p class="mb-1">Temperature: {{ temp_f }}°F</p>
+                        {% if feels_like_f is not none %}
+                        <p class="mb-1">Feels like: {{ feels_like_f }}°F</p>
+                        {% endif %}
+                        {% if humidity is not none %}
+                        <p class="mb-1">Humidity: {{ humidity }}%</p>
+                        {% endif %}
+                        {% if wind_mph is not none %}
+                        <p class="mb-1">Wind: {{ wind_mph }} mph</p>
+                        {% endif %}
+                        {% if visibility_meters is not none %}
+                        <p class="mb-0">Visibility: {{ visibility_meters }} m</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card" data-testid="air-quality-card">
+                    <div class="card-header">Air quality</div>
+                    <div class="card-body">
+                        {% if aqi is not none %}
+                        <p class="mb-1">AQI: {{ aqi }}</p>
+                        {% if pm2_5 is not none %}
+                        <p class="mb-1">PM2.5: {{ pm2_5 }}</p>
+                        {% endif %}
+                        {% if pm10 is not none %}
+                        <p class="mb-0">PM10: {{ pm10 }}</p>
+                        {% endif %}
+                        {% else %}
+                        <p class="mb-0 text-muted">Air quality data unavailable.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <p class="text-muted small mt-3">
+            {{ latitude }}, {{ longitude }}
+        </p>
+
+        {% if user %}
+        {% if not is_saved %}
+        <form method="POST" action="/saved-trails" class="mt-4">
+            <input type="hidden" name="display_name" value="{{ resolved_name }}">
+            <input type="hidden" name="query_text" value="{{ query_text }}">
+            <input type="hidden" name="latitude" value="{{ latitude }}">
+            <input type="hidden" name="longitude" value="{{ longitude }}">
+            <button type="submit" class="btn btn-outline-primary">Save this location</button>
+        </form>
+        {% endif %}
+        {% else %}
+        <div class="alert alert-light border mt-4 mb-0">
+            <a href="{{ url_for('login') }}">Log in</a> to save this location.
+        </div>
+        {% endif %}
+
+        <a href="{{ url_for('trail_checker') }}" class="btn btn-link mt-2">Search again</a>
+    </div>
+</div>
+{% endblock %}

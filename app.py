@@ -19,10 +19,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from flask import (
     Flask, render_template, request, redirect, url_for, session, flash, g,
-    send_from_directory, abort,
+    send_from_directory, abort, jsonify,
 )
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 from werkzeug.security import generate_password_hash, check_password_hash
+from weather_service import (
+    GeocodeNotFoundError,
+    ExternalAPIError,
+    ExternalAPIUnavailableError,
+    get_conditions_for_query,
+)
 
 # ---------------------------------------------------------------------------
 # Application setup
@@ -196,6 +202,106 @@ def about():
     # Each team replaces this content with their own About page (see
     # the assignment instructions in README.md).
     return render_template("about.html")
+
+
+# ---------------------------------------------------------------------------
+# Routes — Trail Checker API
+# ---------------------------------------------------------------------------
+
+def _json_error(code: str, message: str, status: int):
+    return jsonify({"ok": False, "error": {"code": code, "message": message}}), status
+
+
+def _parse_query_text(raw_query: str) -> str | None:
+    query_text = raw_query.strip()
+    if len(query_text) < 2 or len(query_text) > 100:
+        return None
+    return query_text
+
+
+def _results_context_from_data(data: dict, is_saved: bool = False) -> dict:
+    weather = data.get("weather") or {}
+    air_quality = data.get("air_quality") or {}
+    return {
+        "query_text": data["query_text"],
+        "resolved_name": data["resolved_name"],
+        "latitude": data["latitude"],
+        "longitude": data["longitude"],
+        "weather_main": weather.get("main"),
+        "weather_description": weather.get("description"),
+        "temp_f": weather.get("temp_f"),
+        "feels_like_f": weather.get("feels_like_f"),
+        "humidity": weather.get("humidity"),
+        "wind_mph": weather.get("wind_mph"),
+        "visibility_meters": weather.get("visibility_meters"),
+        "aqi": air_quality.get("aqi"),
+        "pm2_5": air_quality.get("pm2_5"),
+        "pm10": air_quality.get("pm10"),
+        "recommendation": data.get("recommendation", "unknown"),
+        "is_saved": is_saved,
+    }
+
+
+def _render_trail_checker_error(message: str, query_text: str = ""):
+    flash(message)
+    return render_template("trail_checker.html", query_text=query_text)
+
+
+@app.route("/trail-checker")
+def trail_checker():
+    return render_template("trail_checker.html")
+
+
+@app.route("/trail-checker/results")
+def trail_checker_results():
+    query_text = _parse_query_text(request.args.get("q", ""))
+    if query_text is None:
+        return _render_trail_checker_error(
+            "Enter a location between 2 and 100 characters.",
+            request.args.get("q", "").strip(),
+        )
+
+    try:
+        data = get_conditions_for_query(query_text)
+    except GeocodeNotFoundError:
+        return _render_trail_checker_error(
+            "Location not found. Try a different search.",
+            query_text,
+        )
+    except ExternalAPIError:
+        return _render_trail_checker_error(
+            "Weather data was malformed. Try again later.",
+            query_text,
+        )
+    except ExternalAPIUnavailableError:
+        return _render_trail_checker_error(
+            "External weather service is unavailable. Try again later.",
+            query_text,
+        )
+
+    return render_template(
+        "trail_results.html",
+        title=f"Trail Checker — {data['resolved_name']}",
+        **_results_context_from_data(data),
+    )
+
+
+@app.route("/api/conditions")
+def api_conditions():
+    query_text = _parse_query_text(request.args.get("q", ""))
+    if query_text is None:
+        return _json_error("invalid_input", "Query must be 2-100 characters.", 400)
+
+    try:
+        data = get_conditions_for_query(query_text)
+    except GeocodeNotFoundError as exc:
+        return _json_error("not_found", str(exc), 404)
+    except ExternalAPIError as exc:
+        return _json_error("external_api_error", str(exc), 502)
+    except ExternalAPIUnavailableError as exc:
+        return _json_error("external_api_unavailable", str(exc), 503)
+
+    return jsonify({"ok": True, "data": data})
 
 
 # ---------------------------------------------------------------------------
