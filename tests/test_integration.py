@@ -108,8 +108,38 @@ def test_logged_in_user_can_search_save_view_recheck_and_delete_trail(client):
     assert saved_response.status_code == 200
     assert b"Mount Rainier" in saved_response.data
 
+    responses.add(
+        responses.GET,
+        "https://api.openweathermap.org/data/2.5/weather",
+        json={
+            "name": "Mount Rainier",
+            "weather": [{"main": "Clear", "description": "clear sky"}],
+            "main": {"temp": 51.0, "feels_like": 49.5, "humidity": 65},
+            "wind": {"speed": 5.0},
+            "visibility": 10000,
+        },
+        status=200,
+    )
+
+    responses.add(
+        responses.GET,
+        "http://api.openweathermap.org/data/2.5/air_pollution",
+        json={
+            "list": [
+                {
+                    "main": {"aqi": 1},
+                    "components": {"pm2_5": 2.1, "pm10": 4.8},
+                }
+            ]
+        },
+        status=200,
+    )
+
     recheck_response = client.get("/saved-trails/1/check")
     assert recheck_response.status_code == 200
+    assert b'data-testid="weather-card"' in recheck_response.data
+    assert b"Clear" in recheck_response.data
+    assert b"This location is already saved." in recheck_response.data
 
     delete_response = client.post("/saved-trails/1/delete", follow_redirects=True)
     assert delete_response.status_code == 200
