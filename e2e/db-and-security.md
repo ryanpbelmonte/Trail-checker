@@ -14,6 +14,7 @@ real browser session honors Flask-Login's auth and ownership rules across
 
 1. **Start a clean stack.** `docker compose down -v && docker compose up -d`.
 2. **Inspect schema in Postgres.** `docker compose exec db psql -U app -d app -c "\d users" -c "\d saved_trails" -c "\d trail_checks"`.
+2b. **Verify `trail_checks` write behavior matches the FK nullability contract.** While logged out, `GET /trail-checker/results?q=Mount%20Rainier`. Then in `psql` run `SELECT user_id, query_text, resolved_name FROM trail_checks ORDER BY id DESC LIMIT 1;`. Log in, repeat the same GET, then run the same SELECT. Confirms that anonymous searches insert with `user_id IS NULL` and logged-in searches insert with `user_id = <current user id>`, exercising the `ondelete="SET NULL"` contract from the schema.
 3. **Probe NOT NULL on `saved_trails.user_id`.** From the same `psql`, run an INSERT that omits `user_id`.
 4. **Probe FK on `saved_trails.user_id`.** Insert a row with `user_id = 999999` (no such user).
 5. **Probe duplicate prevention at the DB layer.** Register `e2e_dbsec_dup_<ts>` via the UI, capture its id with `SELECT id FROM users WHERE username = 'e2e_dbsec_dup_<ts>';`, then run two identical `INSERT INTO saved_trails (user_id, display_name, query_text, latitude, longitude, created_at, updated_at) VALUES (<id>, 'Mount Rainier', 'Mount Rainier', 46.8523, -121.7603, NOW(), NOW());` statements directly in `psql`. Then repeat the duplicate-save attempt via the UI as a separate app-layer check.
@@ -21,12 +22,13 @@ real browser session honors Flask-Login's auth and ownership rules across
 7. **Auth refactor sanity in browser.** Register -> log in -> open dev tools -> confirm the Flask session cookie payload contains `_user_id` and `_fresh` -> log out -> confirm those keys are gone.
 8. **Login-required enforcement.** While logged out, hit `GET /saved-trails`, `POST /saved-trails`, `POST /saved-trails/<id>/delete`, `GET /saved-trails/<id>/check`.
 9. **Ownership probe (two users).** As user A save a trail (note its id). Log out, log in as user B, hit `POST /saved-trails/<A's id>/delete` and `GET /saved-trails/<A's id>/check` directly.
-10. **Secret hygiene check (presence only, never print the value).** Run `docker compose exec app python -c "import os; print('OPENWEATHER_API_KEY:', 'set' if os.getenv('OPENWEATHER_API_KEY') else 'missing')"` and `git grep -nE "OPENWEATHER_API_KEY|appid=|api.openweathermap.org"`. Do not run `env | grep` or otherwise dump the value into shell history, screenshots, or the execution log.
+10. **Secret hygiene check (presence only, never print the value).** Run `docker compose exec app python -c "import os; print('OPENWEATHER_API_KEY:', 'set' if os.getenv('OPENWEATHER_API_KEY') else 'missing')"` and `git grep -nE "OPENWEATHER_API_KEY|appid=|api.openweathermap.org"`. Expect grep matches only in `weather_service.py` (which reads the key from the environment), `.env.example` (template placeholder, no real value), and the README env-var table. Do not run `env | grep` or otherwise dump the value into shell history, screenshots, or the execution log.
 
 ## Pass criteria
 
 1. Both containers reach healthy state; `app` logs show no startup errors.
 2. Column types, `NOT NULL`, `UNIQUE`, and `REFERENCES ... ON DELETE CASCADE` lines match the schema section of `CONTRACTS.md` exactly. A screenshot of `\d saved_trails` goes in the log.
+2b. The anonymous GET produces a `trail_checks` row with `user_id IS NULL`; the logged-in GET produces a row with `user_id = <current user id>`. The `resolved_name` column is populated by the OpenWeather geocoding response, not the raw query.
 3. Postgres rejects the INSERT with `null value in column "user_id" violates not-null constraint`. Not a Python exception - a DB-side error.
 4. Postgres rejects with `violates foreign key constraint`. Verified at the DB layer, not by SQLModel.
 5. The second direct `INSERT` is rejected by Postgres with `duplicate key value violates unique constraint`. If that error does not fire, the contract's "no exact duplicates per user" rule is not actually enforced by the database - file a contract gap and fix it by adding a `UniqueConstraint(user_id, latitude, longitude)` to the SQLModel. The UI attempt may additionally be caught at the app layer, but app-layer enforcement alone does not satisfy this step.
@@ -34,12 +36,13 @@ real browser session honors Flask-Login's auth and ownership rules across
 7. After login, the session cookie payload contains `_user_id` and `_fresh`. After logout those keys are gone. Flask sessions are signed but not encrypted, so the payload is base64-decodable in dev tools.
 8. Every anonymous request returns `302` to `/login` (or `401` for JSON). No 500s, no partial renders that leak data.
 9. Both endpoints return `404`, not `403`, and the response body does not reveal whether trail id `<A's id>` exists.
-10. The presence check prints `set`. `git grep` finds `OPENWEATHER_API_KEY` only in code that reads `os.environ`, never as a hardcoded literal, and finds no `appid=<actual key>` strings. The execution log records "set" / "no hardcoded value found" - never the key itself.
+10. The presence check prints `set`. `git grep` finds `OPENWEATHER_API_KEY` only in `weather_service.py` (reading from `os.environ`), `.env.example` (placeholder), and the README env-var table - never as a hardcoded literal in app code, templates, tests, or logs. No `appid=<actual key>` strings appear anywhere. The execution log records "set" / "no hardcoded value found" - never the key itself.
 
 ## Execution log
 
 1. [ ] 
 2. [ ] Paste `\d` output or screenshot.
+2b. [ ] Record the two SELECT results (anonymous row with NULL user_id, logged-in row with current user id).
 3. [ ] Paste exact Postgres error.
 4. [ ] Paste exact Postgres error.
 5. [ ] Record whether the second direct INSERT was rejected by Postgres or accepted (gap).
@@ -50,3 +53,7 @@ real browser session honors Flask-Login's auth and ownership rules across
 10. [ ] Record "set" / "missing" and grep summary only. Never paste the key.
 
 **Findings & fixes:** Replace with real observations; link commit SHAs for any fix. Honest "step 5: Postgres accepted the duplicate - added `UniqueConstraint` in <sha>" is worth more than ten green checkmarks.
+
+## Per-role note
+
+This file is the DB-and-security contribution to the team e2e. See `e2e/server.md` (Ryan) and `e2e/client-side.md` (Liam) for the parallel slices. Coordinator should link these into the whole-system e2e.
