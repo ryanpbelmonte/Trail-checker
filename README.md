@@ -51,3 +51,39 @@ Our backup plan is to reduce external API use by storing a small predefined trai
 We chose this project because it gives each team member a clear technical area while still forcing us to work together on integration. The server-side work involves coordinating several external APIs, the client-side work involves presenting mixed data clearly, and the database/security work involves storing trail data, validating inputs, protecting API keys, and designing basic caching.
 
 This project also gives us practice with real production concerns: rate limits, API keys, fallback behavior, partial failures, and clean data presentation. Those skills transfer well to many types of software projects, including backend systems, platform engineering, data tools, and public-facing web apps.
+
+## Running locally
+
+```bash
+docker compose up -d
+```
+
+The Flask app is available at `http://localhost:5000`.
+
+## Resetting the database
+
+The app uses `SQLModel.metadata.create_all` for first-run schema creation. This does not alter existing tables when constraints change.
+
+When schema changes land (new columns, new constraints, FK cascade behavior, unique constraints), reset the Postgres volume:
+
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+Skipping `-v` will silently keep the previous schema and the new constraints will not be enforced.
+
+## Required environment variables
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `SECRET_KEY` | Yes (non-debug) | The app refuses to boot outside of debug/testing if this is left at the default. |
+| `DATABASE_URL` | Yes | Defaults to the Compose Postgres URL. |
+| `OPENWEATHER_API_KEY` | Server-side slice | Never hardcode; read only from environment. |
+| `TESTING` | Tests only | Set to `1` to disable CSRF and the login rate limiter during pytest runs. `tests/conftest.py` sets this automatically. |
+
+## Running tests
+
+```bash
+pytest -v
+```

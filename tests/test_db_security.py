@@ -3,20 +3,15 @@ Week 6 DB-and-security contract tests for Trail Checker.
 
 Owner: Nick Stjern - DB-and-security
 
-These tests describe the agreed schema and authorization behavior before
-implementation exists. They should fail at first, then pass when the
-schema, Flask-Login refactor, and ownership rules are implemented.
+These tests describe the agreed schema and authorization behavior. They
+exercise the Flask-Login refactor, login-required enforcement, and the
+ownership-based 404 contract from CONTRACTS.md.
 """
 
-import os
-
-# These must be set BEFORE importing app.py.
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-os.environ["SECRET_KEY"] = "test-secret"
-
 import pytest
-from sqlmodel import SQLModel
-from app import app, engine
+from sqlmodel import SQLModel, Session, select
+
+from app import app, engine, SavedTrail, User
 
 
 @pytest.fixture
@@ -107,8 +102,8 @@ def test_anonymous_user_cannot_save_trail(client):
     assert response.status_code in (302, 401)
 
 
-def test_non_owner_delete_returns_404(client):
-    """A user deleting another user's saved trail must receive 404, not 403."""
+def test_non_owner_delete_returns_404_for_missing_trail(client):
+    """Deleting a non-existent trail must return 404 (does not leak existence)."""
     client.post("/register", data={"username": "alice", "password": "password123"})
     client.post("/logout")
     client.post("/register", data={"username": "bob", "password": "password123"})
@@ -116,3 +111,88 @@ def test_non_owner_delete_returns_404(client):
     response = client.post("/saved-trails/999/delete")
 
     assert response.status_code == 404
+
+
+def test_non_owner_delete_real_trail_returns_404(client):
+    """A user deleting another user's *real* saved trail must receive 404."""
+    client.post("/register", data={"username": "alice", "password": "password123"})
+
+    client.post(
+        "/saved-trails",
+        data={
+            "display_name": "Mount Rainier",
+            "query_text": "Mount Rainier",
+            "latitude": "46.8523",
+            "longitude": "-121.7603",
+        },
+    )
+
+    with Session(engine) as db:
+        alice_trail = db.exec(select(SavedTrail)).first()
+        assert alice_trail is not None
+        alice_trail_id = alice_trail.id
+
+    client.post("/logout")
+    client.post("/register", data={"username": "bob", "password": "password123"})
+
+    delete_response = client.post(f"/saved-trails/{alice_trail_id}/delete")
+    assert delete_response.status_code == 404
+
+    check_response = client.get(f"/saved-trails/{alice_trail_id}/check")
+    assert check_response.status_code == 404
+
+    with Session(engine) as db:
+        still_there = db.get(SavedTrail, alice_trail_id)
+        assert still_there is not None
+        alice = db.exec(select(User).where(User.username == "alice")).first()
+        assert still_there.user_id == alice.id
+
+
+def test_saved_trail_unique_constraint_blocks_duplicate(client):
+    """The composite unique constraint must reject duplicate saves at the DB layer."""
+    client.post("/register", data={"username": "carol", "password": "password123"})
+
+    payload = {
+        "display_name": "Mount Rainier",
+        "query_text": "Mount Rainier",
+        "latitude": "46.8523",
+        "longitude": "-121.7603",
+    }
+
+    client.post("/saved-trails", data=payload)
+    client.post("/saved-trails", data=payload)
+
+    with Session(engine) as db:
+        rows = db.exec(select(SavedTrail)).all()
+        assert len(rows) == 1
+
+
+def test_cascade_delete_removes_users_saved_trails(client):
+    """Deleting a user must cascade-delete that user's saved trails."""
+    client.post("/register", data={"username": "dora", "password": "password123"})
+
+    client.post(
+        "/saved-trails",
+        data={
+            "display_name": "Mount Rainier",
+            "query_text": "Mount Rainier",
+            "latitude": "46.8523",
+            "longitude": "-121.7603",
+        },
+    )
+
+    with Session(engine) as db:
+        dora = db.exec(select(User).where(User.username == "dora")).first()
+        assert dora is not None
+        trail_count_before = len(
+            db.exec(select(SavedTrail).where(SavedTrail.user_id == dora.id)).all()
+        )
+        assert trail_count_before == 1
+
+        db.delete(dora)
+        db.commit()
+
+        trail_count_after = len(
+            db.exec(select(SavedTrail).where(SavedTrail.user_id == dora.id)).all()
+        )
+        assert trail_count_after == 0
