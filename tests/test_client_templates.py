@@ -13,8 +13,10 @@ import os
 # These must be set BEFORE importing app.py.
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["SECRET_KEY"] = "test-secret"
+os.environ["OPENWEATHER_API_KEY"] = "fake-test-key"
 
 import pytest
+import responses
 from sqlmodel import SQLModel
 from app import app, engine
 
@@ -49,8 +51,51 @@ def test_base_nav_links_to_trail_checker(client):
     assert b'href="/trail-checker"' in response.data
 
 
+@responses.activate
 def test_results_page_has_stable_result_sections(client):
     """The results page includes stable selectors for client-side layout tests."""
+    responses.add(
+        responses.GET,
+        "http://api.openweathermap.org/geo/1.0/direct",
+        json=[
+            {
+                "name": "Mount Rainier",
+                "lat": 46.8523,
+                "lon": -121.7603,
+                "country": "US",
+                "state": "Washington",
+            }
+        ],
+        status=200,
+    )
+
+    responses.add(
+        responses.GET,
+        "https://api.openweathermap.org/data/2.5/weather",
+        json={
+            "name": "Mount Rainier",
+            "weather": [{"main": "Clouds", "description": "overcast clouds"}],
+            "main": {"temp": 48.2, "feels_like": 45.1, "humidity": 72},
+            "wind": {"speed": 8.3},
+            "visibility": 10000,
+        },
+        status=200,
+    )
+
+    responses.add(
+        responses.GET,
+        "http://api.openweathermap.org/data/2.5/air_pollution",
+        json={
+            "list": [
+                {
+                    "main": {"aqi": 2},
+                    "components": {"pm2_5": 4.2, "pm10": 7.5},
+                }
+            ]
+        },
+        status=200,
+    )
+
     response = client.get("/trail-checker/results?q=Mount%20Rainier")
 
     assert response.status_code == 200

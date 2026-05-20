@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="py-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <span class="badge text-bg-success mb-2">Saved Trails</span>
+            <h1 class="display-6 fw-bold mb-1">Your saved locations</h1>
+            <p class="text-muted mb-0">
+                Re-check current conditions for trailheads and outdoor spots you want to revisit.
+            </p>
+        </div>
+
+        <a href="/trail-checker" class="btn btn-primary">
+            Check a new location
+        </a>
+    </div>
+
+    {% if saved_trails %}
+    <div class="row g-4">
+        {% for trail in saved_trails %}
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h2 class="h5 card-title">{{ trail.display_name }}</h2>
+
+                    <p class="text-muted small mb-2">
+                        Original search: {{ trail.query_text }}
+                    </p>
+
+                    <p class="small mb-3">
+                        {{ trail.latitude }}, {{ trail.longitude }}
+                    </p>
+
+                    {% if trail.notes %}
+                    <p class="small border rounded-3 p-2 bg-light">
+                        {{ trail.notes }}
+                    </p>
+                    {% endif %}
+
+                    <div class="d-flex gap-2 flex-wrap">
+                        <a href="/saved-trails/{{ trail.id }}/check" class="btn btn-outline-primary btn-sm">
+                            Re-check
+                        </a>
+
+                        <form method="POST" action="/saved-trails/{{ trail.id }}/delete">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-outline-danger btn-sm">
+                                Delete
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card border-0 shadow-sm" data-testid="saved-trails-empty">
+        <div class="card-body p-4 p-md-5 text-center">
+            <h2 class="h4 fw-bold">No saved trails yet</h2>
+            <p class="text-muted mb-4">
+                Search for a trailhead or outdoor location, then save it so you can quickly check it again later.
+            </p>
+            <a href="/trail-checker" class="btn btn-primary">
+                Search for a location
+            </a>
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

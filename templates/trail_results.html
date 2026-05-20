@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="py-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-3 mb-4">
+        <div>
+            <span class="badge text-bg-success mb-2">Live Conditions</span>
+            <h1 class="display-6 fw-bold mb-1">Conditions for {{ resolved_name }}</h1>
+            <p class="text-muted mb-0">
+                Search: {{ query_text }} - Coordinates: {{ latitude }}, {{ longitude }}
+            </p>
+        </div>
+
+        <a href="/trail-checker" class="btn btn-outline-primary">
+            Search again
+        </a>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body p-4">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+                <div>
+                    <h2 class="h4 fw-bold mb-1">Trail readiness</h2>
+                    <p class="text-muted mb-0">
+                        A quick recommendation based on current weather and air quality.
+                    </p>
+                </div>
+
+                <div data-testid="recommendation-badge">
+                    {% if recommendation == "good" %}
+                    <span class="badge text-bg-success fs-6 px-3 py-2">Good</span>
+                    {% elif recommendation == "caution" %}
+                    <span class="badge text-bg-warning fs-6 px-3 py-2">Use Caution</span>
+                    {% elif recommendation == "poor" %}
+                    <span class="badge text-bg-danger fs-6 px-3 py-2">Poor</span>
+                    {% else %}
+                    <span class="badge text-bg-secondary fs-6 px-3 py-2">Unknown</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card h-100 shadow-sm" data-testid="weather-card">
+                <div class="card-header bg-white">
+                    <h2 class="h5 mb-0">Weather</h2>
+                </div>
+
+                <div class="card-body">
+                    <p class="lead mb-3">
+                        <strong>{{ weather_main }}</strong>
+                        <span class="text-muted">- {{ weather_description }}</span>
+                    </p>
+
+                    <dl class="row mb-0">
+                        <dt class="col-sm-5">Temperature</dt>
+                        <dd class="col-sm-7">{{ temp_f }} F</dd>
+
+                        {% if feels_like_f is not none %}
+                        <dt class="col-sm-5">Feels like</dt>
+                        <dd class="col-sm-7">{{ feels_like_f }} F</dd>
+                        {% endif %}
+
+                        {% if humidity is not none %}
+                        <dt class="col-sm-5">Humidity</dt>
+                        <dd class="col-sm-7">{{ humidity }}%</dd>
+                        {% endif %}
+
+                        {% if wind_mph is not none %}
+                        <dt class="col-sm-5">Wind</dt>
+                        <dd class="col-sm-7">{{ wind_mph }} mph</dd>
+                        {% endif %}
+
+                        {% if visibility_meters is not none %}
+                        <dt class="col-sm-5">Visibility</dt>
+                        <dd class="col-sm-7">{{ visibility_meters }} m</dd>
+                        {% endif %}
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card h-100 shadow-sm" data-testid="air-quality-card">
+                <div class="card-header bg-white">
+                    <h2 class="h5 mb-0">Air quality</h2>
+                </div>
+
+                <div class="card-body">
+                    {% if aqi is not none %}
+                    <dl class="row mb-0">
+                        <dt class="col-sm-5">AQI</dt>
+                        <dd class="col-sm-7">{{ aqi }}</dd>
+
+                        {% if pm2_5 is not none %}
+                        <dt class="col-sm-5">PM2.5</dt>
+                        <dd class="col-sm-7">{{ pm2_5 }}</dd>
+                        {% endif %}
+
+                        {% if pm10 is not none %}
+                        <dt class="col-sm-5">PM10</dt>
+                        <dd class="col-sm-7">{{ pm10 }}</dd>
+                        {% endif %}
+                    </dl>
+                    {% else %}
+                    <div class="alert alert-light border mb-0">
+                        Air quality data is unavailable for this location right now.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if user %}
+        {% if not is_saved %}
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-body">
+                <h2 class="h5 fw-bold">Save this location</h2>
+                <p class="text-muted">
+                    Save this location so you can re-check conditions faster later.
+                </p>
+
+                <form method="POST" action="/saved-trails">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="display_name" value="{{ resolved_name }}">
+                    <input type="hidden" name="query_text" value="{{ query_text }}">
+                    <input type="hidden" name="latitude" value="{{ latitude }}">
+                    <input type="hidden" name="longitude" value="{{ longitude }}">
+                    <input type="hidden" name="country" value="{{ country or '' }}">
+                    <input type="hidden" name="state" value="{{ state or '' }}">
+
+                    <button type="submit" class="btn btn-primary">
+                        Save this location
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <div class="alert alert-success mt-4">
+            This location is already saved.
+        </div>
+        {% endif %}
+    {% else %}
+    <div class="alert alert-light border mt-4 mb-0">
+        <a href="/login">Log in</a> to save this location.
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
