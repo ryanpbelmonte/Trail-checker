@@ -698,6 +698,21 @@ At least one E2E step must hit the real OpenWeather service, not mocked fixtures
 
 Week 7 adds federated identity via GitHub OAuth. The Week 6 contracts above remain in force; this section adds to and modifies them where noted.
 
+**`external_dependency: github.com`** — see `docs/Week7_StudyGuide.md` for the representative Authorization Code flow, access-token response, and `/user` JSON shape. This contract specifies what our code does in response to a GitHub payload. It does **not** specify GitHub's behavior; we cannot, because GitHub is not in our repo.
+
+### 7a.0 Part 1 required-item map
+
+The Week 7 assignment requires `CONTRACTS.md` to cover six items. They are covered in this section as follows:
+
+| Required item | Where covered |
+|---|---|
+| 1. New routes (`/login/github`, `/auth/github/callback`) — inputs/outputs | §7a.13 (login), §7a.14 (callback); §7a.3 (transactional behavior); §7a.4 (state); §7a.5 (rate limits) |
+| 2. Required provider fields + behavior when missing | §7a.15 |
+| 3. Local user record after first-time OAuth login | §7a.1 (schema), §7a.2 (linking policy), §7a.15 (field → column mapping) |
+| 4. External identity link (`User` ↔ `OAuthIdentity`) | §7a.1, §7a.2 |
+| 5. Post-callback session state (session dict + cookies) | §7a.7 (lifetimes), §7a.14 (session keys + cookies set on callback success) |
+| 6. Logout — local clears, provider not touched | §7a.16 |
+
 ### 7a.1 Schema additions
 
 New table `oauth_identity`:
@@ -757,8 +772,8 @@ A single-gate guard is insufficient: one misconfigured deploy with `TESTING=1` l
 
 * `PERMANENT_SESSION_LIFETIME` = 12 hours. Applied by setting `session.permanent = True` after every `login_user(...)` call.
 * `REMEMBER_COOKIE_DURATION` = 30 days. Applied when `login_user(user, remember=True)` is called.
-* OAuth login is always `remember=True` (Liam L5 spec).
-* Password login reads the `remember` form field (truthy = remember=True).
+* **Password login** reads the `remember` form field (truthy ⇒ `remember=True`). Per team-agreed L5.
+* **OAuth login** uses the normal session lifetime — `login_user(user)` is called **without** `remember=True`. The Remember-Me cookie is not issued for OAuth in Week 7. Per team-agreed L5; supersedes an earlier draft of this section.
 * `SESSION_PROTECTION="strong"`: any mismatch in IP/User-Agent on session reload triggers a full logout (not just `non-fresh`). The false-positive cost (user changes networks) is acceptable for this app.
 
 ### 7a.8 Secret hygiene (Nick N6)
@@ -797,6 +812,112 @@ This contract is cross-slice:
 * Nick (DB-and-security): guarantees `User.username` is non-null, unique, and stable for the session lifetime.
 * Liam (client): owns the navbar template and the exact text rendering.
 * Ryan (server): guarantees that the OAuth callback writes a non-empty `User.username` per §7a.2 before calling `login_user`.
+
+### 7a.13 Route: `GET /login/github` (Ryan)
+
+**Owner:** Server-side (Ryan)
+**Auth required:** No
+**Purpose:** Start the GitHub OAuth Authorization Code flow.
+
+Request:
+
+* No query parameters.
+* Authlib generates a random `state` value and stores it in the server session before redirect.
+
+Server behavior:
+
+1. Call `oauth.github.authorize_redirect(redirect_uri=url_for("auth_github_callback", _external=True))`.
+2. Browser is redirected to `https://github.com/login/oauth/authorize` with `client_id`, `redirect_uri`, `state`, and the configured scopes.
+
+Response:
+
+* `302 Found` redirect to GitHub.
+
+Errors:
+
+* Missing OAuth client configuration must fail at app startup (env vars read via `os.environ["GITHUB_OAUTH_CLIENT_ID"]` etc.); the route itself never sees a partial config.
+* If Authlib's provider registration is misconfigured at request time, return a generic `500` page. Never expose secrets in the error.
+
+Rate limit: not rate-limited (no auth side effects; the side-effect surface is the callback).
+
+**Tested by:** the GitHub button rendered on `/login` (Liam's client test); manual real-GitHub smoke once per environment (named gap in `team_walkthrough.md`).
+
+### 7a.14 Route: `GET /auth/github/callback` (Ryan)
+
+**Owner:** Server-side (Ryan); schema and session hardening owned by DB-and-security (Nick).
+**Auth required:** No (this route establishes auth).
+**Purpose:** Complete OAuth after GitHub redirects back with an authorization code.
+
+Request query parameters:
+
+| Name  | Required | Validation |
+| ----- | -------- | ---------- |
+| code  | Yes      | Opaque authorization code from GitHub |
+| state | Yes      | Must match the `state` stored in session (validated by Authlib per §7a.4) |
+
+Server behavior:
+
+1. Validate `state` and exchange `code` for an access token via `oauth.github.authorize_access_token()`. The exchange is server-to-server and uses `GITHUB_OAUTH_CLIENT_SECRET`; the access token never reaches the browser.
+2. Call GitHub's `/user` endpoint with the token and read fields per §7a.15.
+3. Run the transactional create-or-link flow in §7a.3 against `OAuthIdentity` and `User`.
+4. Call `login_user(user)` (no `remember=True` per §7a.7) and set `session.permanent = True`.
+5. `302 Found` to `/saved-trails`.
+
+Success response (post-callback session state):
+
+* `302 Found` redirect to `/saved-trails`.
+* Flask session cookie (HMAC-signed with `SECRET_KEY`) carries `_user_id = str(user.id)` and `_fresh = True`.
+* Cookie flags applied per §4 Week 7 block: `HttpOnly`, `SameSite=Lax`, `Secure` outside debug/testing.
+* `PERMANENT_SESSION_LIFETIME` = 12 hours per §7a.7.
+* Remember-Me cookie is **not** set for OAuth logins.
+
+Errors:
+
+* Invalid or missing `state` → catch Authlib's `MismatchingStateError`, redirect to `/login` with a generic error flash.
+* Token exchange failure → redirect to `/login` with a generic error flash. Never log the `code` or the access token.
+* GitHub `/user` payload missing required `id` → return `502 external_api_error`; do not create a `User`.
+* Partial optional fields (`login`, `name`, `email`) → apply defaults per §7a.15; never crash on null or missing optional fields.
+* `IntegrityError` on the unique `(provider, provider_user_id)` constraint (concurrent callback) → rollback, re-SELECT the winning `OAuthIdentity`, and proceed normally per §7a.3.
+
+Rate limit: 10/minute per IP per §7a.5.
+
+**Tested by:** server-side Playwright happy-path (via `/test/login/<username>` for everything after the redirect lands); Part 3 first-time and returning OAuth scenarios. The real `github.com` redirect itself is verified manually and named as a gap in `team_walkthrough.md`.
+
+### 7a.15 GitHub user-info fields and defaults (Ryan)
+
+The callback reads the following from GitHub's `/user` response:
+
+| GitHub field | Required by us? | Use in Trail Checker | If missing / null |
+| ------------ | --------------- | -------------------- | ------------------ |
+| `id`         | **Yes**         | `oauth_identity.provider_user_id` (stored as string) | Return `502`; do not create a `User`. |
+| `login`      | No              | Preferred source for `users.username` on first OAuth login | Use `github-{provider_user_id}`. |
+| `name`       | No              | Not persisted in the Week 7 schema | Ignore. |
+| `email`      | No              | Read but **not stored** on `users` in Week 7 | Ignore. |
+
+Username collision: if a `User` already exists with `username = login`, the callback uses `github-{provider_user_id}` instead. The unique constraint on `users.username` is the source of truth; the chosen username is whatever survives the insert.
+
+**Trust rule:** only `provider_user_id` (obtained via the authenticated token exchange) is used as a lookup key. `email` and `login` are never used as foreign keys (study guide §3; reinforced by §7a.2).
+
+### 7a.16 Logout (OAuth) (Ryan + Nick + Liam)
+
+Route: existing `POST /logout` (CSRF-protected).
+
+What is cleared **locally**:
+
+* Flask-Login session via `logout_user()` (removes `_user_id` and `_fresh` from the signed session cookie).
+* Flask-Login Remember-Me cookie if present (password-login flow only; OAuth does not issue one).
+* All application session data tied to the current user.
+
+What is **not** cleared at the provider:
+
+* GitHub session at `github.com` — the user remains signed in to GitHub itself; we do not call any token-revoke or sign-out endpoint at the provider. This is intentional: the user can sign in again next time without re-entering GitHub credentials.
+
+After logout:
+
+* `302 Found` to `/login`.
+* Protected routes (e.g. `/saved-trails`) redirect anonymous users back to `/login` on next request.
+
+**Tested by:** DB-and-security Playwright test (protected page before/after login/logout); Part 3 session and logout scenarios.
 
 ## 8. Known limitations for Week 6
 
