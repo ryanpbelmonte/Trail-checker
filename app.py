@@ -134,10 +134,23 @@ login_manager.session_protection = "strong"
 
 csrf = CSRFProtect(app)
 
+
+def _oauth_github_configured() -> bool:
+    return bool(
+        os.environ.get("GITHUB_OAUTH_CLIENT_ID")
+        and os.environ.get("GITHUB_OAUTH_CLIENT_SECRET")
+    )
+
+
+if not TESTING and not _oauth_github_configured():
+    raise RuntimeError(
+        "GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET must be set "
+        "when TESTING is not enabled. Copy .env.example to .env and configure "
+        "your GitHub OAuth app (see CONTRACTS.md §7a.13)."
+    )
+
 oauth = OAuth(app)
-if os.environ.get("GITHUB_OAUTH_CLIENT_ID") and os.environ.get(
-    "GITHUB_OAUTH_CLIENT_SECRET"
-):
+if _oauth_github_configured():
     oauth.register(
         name="github",
         client_id=os.environ["GITHUB_OAUTH_CLIENT_ID"],
@@ -398,13 +411,6 @@ def validate_password_policy(password: str) -> None:
             f"Password must be {MIN_PASSWORD_LENGTH}-{MAX_PASSWORD_LENGTH} "
             "characters and include both letters and a digit."
         )
-
-
-def _oauth_github_configured() -> bool:
-    return bool(
-        os.environ.get("GITHUB_OAUTH_CLIENT_ID")
-        and os.environ.get("GITHUB_OAUTH_CLIENT_SECRET")
-    )
 
 
 def _test_login_allowed() -> bool:

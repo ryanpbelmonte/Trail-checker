@@ -835,7 +835,8 @@ Response:
 
 Errors:
 
-* Missing OAuth client configuration must fail at app startup (env vars read via `os.environ["GITHUB_OAUTH_CLIENT_ID"]` etc.); the route itself never sees a partial config.
+* **Production / non-test runs:** if `TESTING` is not enabled, missing `GITHUB_OAUTH_CLIENT_ID` or `GITHUB_OAUTH_CLIENT_SECRET` must fail at app startup (`RuntimeError` on import). OAuth routes are not registered until both vars are present; the route handler never sees a partial config in production.
+* **`TESTING=1` (pytest, CI):** OAuth env vars may be omitted so unit/e2e tests can run without a GitHub app. Authlib is not registered; `GET /login/github` redirects to `/login` with a generic flash. Browser tests use `/test/login/<username>` per §7a.6.
 * If Authlib's provider registration is misconfigured at request time, return a generic `500` page. Never expose secrets in the error.
 
 Rate limit: not rate-limited (no auth side effects; the side-effect surface is the callback).

@@ -227,6 +227,8 @@ These are the places where one role's work depends on or constrains another's. T
 
 - Nick's earlier "Coordination items for Ryan" bullet that read *"OAuth login: always call `login_user(user, remember=True)`"* is superseded by the resolved §7a.7. Kept as-is in Nick's implementation-notes section above for historical accuracy; the authoritative spec is §7a.7 as edited.
 
+- §7a.13 originally required missing `GITHUB_OAUTH_*` env to fail at startup with no exception; implementation and CI need `TESTING=1` runs without a GitHub app (backdoor e2e). §7a.13 Errors now split production (fail on import) vs `TESTING=1` (OAuth optional; `/login/github` flashes to `/login`). Ryan PR #18.
+
 ### Pushback / decisions deliberately deferred to a later week
 
 - No multi-provider auto-link by email this week (study guide §3 default).
