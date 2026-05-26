@@ -1,10 +1,16 @@
-# Week 7 Role Work — Liam Sipp
+# Week 7 Role Work
 
-## Role
+Per-person sections for Part 2 (Course 506 Week 7). Each teammate documents their slice, files touched, and Playwright coverage.
+
+---
+
+## Liam Sipp — Client-side
+
+### Role
 
 Client-side
 
-## Files touched
+### Files touched
 
 - `templates/login.html`
 - `templates/base.html`
@@ -13,7 +19,7 @@ Client-side
 - `tests/test_client_templates.py`
 - `requirements.txt`
 
-## What I changed
+### What I changed
 
 I updated the login page for the Week 7 OAuth flow by adding a visible **Sign in with GitHub** button while keeping the existing username/password login form. I also added a **Remember me** checkbox to the password login form using `name="remember"`, matching the Week 7 DB/security contract that reads this field in the login route.
 
@@ -25,7 +31,7 @@ This gives the Playwright tests a reliable user-visible target. I also kept logo
 
 The password login success redirect now lands on `/saved-trails`, which matches the team’s Week 7 client-side UX decision.
 
-## Tests added or updated
+### Tests added or updated
 
 I updated the existing auth redirect test so it expects successful password login to redirect to `/saved-trails`.
 
@@ -41,14 +47,14 @@ Current non-e2e result:
 
 `44 passed, 1 warning`
 
-## Playwright status
+### Playwright status
 
 The required Playwright test for my client-side slice depends on Ryan’s Week 7 routes:
 
 - `/login/github`
 - `/test/login/<username>`
 
-Those routes are not present in my branch yet, so I did not add the final Playwright test in this commit. Once Ryan’s OAuth initiator route and test-login backdoor land, my Playwright test should cover this user-visible flow:
+Those routes were not present in my branch at commit time, so I did not add the final Playwright test in that commit. Once Ryan’s OAuth initiator route and test-login backdoor land on `main`, my Playwright test should cover this user-visible flow:
 
 1. logged-out user opens `/login`
 2. user sees and clicks **Sign in with GitHub**
@@ -58,6 +64,48 @@ Those routes are not present in my branch yet, so I did not add the final Playwr
 6. user clicks **Logout**
 7. user lands on `/login`
 
-## Known gaps
+### Known gaps
 
-This branch does not test the real GitHub redirect. The team contract uses the test-login backdoor for browser-based tests and documents the real GitHub provider as an external dependency. This branch also does not implement OAuth callback behavior or the test-login backdoor because those are Ryan’s server-side responsibilities.
+This branch does not test the real GitHub redirect. The team contract uses the test-login backdoor for browser-based tests and documents the real GitHub provider as an external dependency. OAuth callback behavior and the test-login backdoor are Ryan’s server-side responsibilities.
+
+---
+
+## Ryan Belmonte — Server-side
+
+### Role
+
+Server-side
+
+### Files touched
+
+- `app.py` — Authlib GitHub OAuth routes, transactional create/link, test-login backdoor
+- `requirements.txt` — `Authlib`
+- `tests/e2e/conftest.py` — `live_server` fixture for Playwright
+- `tests/e2e/test_server_oauth_login.py` — server-side Playwright test
+
+### What I implemented
+
+- `GET /login/github` starts the GitHub Authorization Code flow when OAuth env vars are configured.
+- `GET /auth/github/callback` exchanges the code, loads GitHub `/user`, runs create-or-link on `OAuthIdentity`, calls `login_user`, and redirects to `/saved-trails`.
+- `GET /test/login/<username>` is the test-only login backdoor (§7a.6): requires `TESTING=1` and localhost/debug, otherwise 404.
+- OAuth login uses normal session lifetime (`login_user` without `remember=True`) per team-agreed L5 and CONTRACTS.md §7a.7.
+
+### Playwright test
+
+**File:** `tests/e2e/test_server_oauth_login.py`
+
+**What it verifies:** A logged-out user cannot reach `/saved-trails`, logs in through `/test/login/alice` (standing in for post-OAuth session establishment), lands on `/saved-trails`, and sees `Logged in as alice` in the rendered navbar.
+
+**Week 6 walkthrough adapted:** None — this is a new Week 7 server-side path focused on OAuth session establishment.
+
+**Run locally:**
+
+```bash
+python3 -m playwright install chromium
+TESTING=1 SECRET_KEY=test-secret-e2e pytest tests/e2e/ -q
+```
+
+### Known gaps
+
+- Does not exercise the real `github.com` redirect or token exchange in CI — manual smoke once with a configured OAuth app.
+- Does not assert `OAuthIdentity` row creation in the browser test (covered by Nick's unit tests and planned Part 3 lifecycle tests).
