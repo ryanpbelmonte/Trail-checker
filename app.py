@@ -486,7 +486,7 @@ def login():
         remember=remember,
         ip=request.remote_addr,
     )
-    return redirect(url_for("home"))
+    return redirect(url_for("saved_trails"))
 
 
 @app.route("/logout", methods=["POST"])
@@ -495,7 +495,7 @@ def logout():
     user_id = current_user.id
     logout_user()
     audit("user.logout", user_id=user_id, ip=request.remote_addr)
-    return redirect(url_for("home"))
+    return redirect(url_for("login"))
 
 
 @app.route("/about")
