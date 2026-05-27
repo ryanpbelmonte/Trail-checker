@@ -107,3 +107,130 @@ TESTING=1 SECRET_KEY=test-secret-e2e pytest tests/e2e/ -q
 
 - CI/e2e do not call real GitHub (backdoor only).
 - E2e does not assert `oauth_identity` row creation (Nick's unit tests + Part 3 lifecycle).
+
+---
+
+## Nick Stjern - DB-and-security
+
+**Week 7 Part 2:** OAuth schema/session hardening (PR #15, merged to `main`) + Playwright protected-route lifecycle test (`db-sec-rolework`).
+
+**Week 7 Part 3:** CSRF and session-expiry scenarios in `tests/e2e/test_full_lifecycle.py` (PR into `Week7-Part3`).
+
+### Role
+
+DB-and-security
+
+### Files touched
+
+**Week 7 schema / security (merged earlier):**
+
+- `app.py` — `OAuthIdentity` model, nullable `users.password_hash`, session/cookie config (`PERMANENT_SESSION_LIFETIME`, `REMEMBER_COOKIE_DURATION`, `SESSION_PROTECTION="strong"`), `load_dotenv()`, login guards for OAuth-only users
+- `requirements.txt` — `python-dotenv`
+- `.env.example` — documents `SECRET_KEY`, `OPENWEATHER_API_KEY`, `GITHUB_OAUTH_*`
+- `tests/test_db_security.py` — Week 7 schema and session/cookie assertions
+- `tests/test_auth.py` — remember-me and `session.permanent` behavior
+- `CONTRACTS.md` — §7a addendum (OAuth schema, linking policy, session/CSRF/backdoor contracts, §7a.12 navbar text)
+- `coord_session.md` — implementation notes and coordination items
+- `e2e/db-and-security.md` — manual E2E walk for schema, auth, ownership, secret hygiene
+
+**Week 7 Playwright — Part 2 (`db-sec-rolework`):**
+
+- `tests/e2e/test_protected_routes.py` — browser-driven protected-page lifecycle test
+
+**Week 7 Playwright — Part 3 (this PR into `Week7-Part3`):**
+
+- `tests/e2e/test_full_lifecycle.py` — scenarios 3 (CSRF) and 4 (session expiry)
+
+### What I implemented
+
+**N1–N7 (Week 7 DB-and-security block):**
+
+- **N1** — `oauth_identity` table with `UNIQUE(provider, provider_user_id)`, provider whitelist check, non-empty `provider_user_id` check, indexed `user_id`, `ON DELETE CASCADE`
+- **N2** — `users.password_hash` nullable for OAuth-only users; login route rejects NULL safely with constant-time behavior
+- **N3** — No auto-link by email; each new GitHub identity creates a distinct user (enforced by schema + contract)
+- **N4** — 12-hour session lifetime, 30-day remember-me cookie, `session.permanent = True` after login, `SESSION_PROTECTION="strong"`
+- **N5** — CSRF remains enabled on all POST routes in non-test mode; no new exemptions
+- **N6** — `python-dotenv`, `.env.example`, secret hygiene documented in README/CONTRACTS
+- **N7** — E2E test plumbing: file-backed SQLite in `tests/e2e/conftest.py` (shared with Liam/Ryan; extended on `main` with `live_server`)
+
+**Playwright slice (Part 2 grading criterion):**
+
+- Verifies `/saved-trails` is **DOM-inaccessible** while anonymous, **accessible** after authentication, and **DOM-inaccessible again** after logout
+- Uses the **password registration path** (`/register`), not GitHub OAuth, so the test does not depend on Ryan's Authlib wiring or live GitHub
+- Uses the shared `live_server` fixture from `tests/e2e/conftest.py` (same threaded Werkzeug server as Liam and Ryan's tests)
+- Asserts on rendered DOM via Playwright `expect`, including a no-leak check (`Your saved locations` count `0` when anonymous)
+
+**Part 3 lifecycle scenarios (Nick owns 3 & 4 in `test_full_lifecycle.py`):**
+
+- **Scenario 3 — CSRF:** Log in via backdoor, temporarily set `WTF_CSRF_ENABLED=True` (normally off under `TESTING=1`), send tokenless `POST /logout` via `page.request.post`, assert logout did **not** occur and protected page still renders
+- **Scenario 4 — Session expiry:** Set `PERMANENT_SESSION_LIFETIME` to 2 seconds before backdoor login, wait past lifetime, assert `/saved-trails` shows login gate and protected DOM does not leak
+
+### Tests added or updated
+
+**Unit / integration (`tests/test_db_security.py`, `tests/test_auth.py`):**
+
+- `oauth_identity` table columns, constraints, cascade delete
+- Nullable `password_hash`, OAuth-only user creation, NULL-password login rejection
+- Session lifetime, remember cookie duration, `session_protection`, cookie security flags
+- Existing Week 6 coverage retained: ownership rules, unique constraints, cascade delete, login-required routes
+
+**Run locally (unit/integration only):**
+
+```bash
+TESTING=1 SECRET_KEY=test-secret pytest tests/ --ignore=tests/e2e -v
+```
+
+Current result on `main`: `44 passed, 1 warning` (after Liam's Week 7 client tests merged)
+
+### Playwright tests
+
+**Part 2 — `tests/e2e/test_protected_routes.py`**
+
+**What it verifies:**
+
+1. **Anonymous** — `GET /saved-trails` shows the login form; protected heading `Your saved locations` does not appear in the DOM
+2. **Authenticated** — register `e2e-protected` via `/register`, visit `/saved-trails`, page renders `Your saved locations` and navbar contains the username
+3. **Logged out** — POST logout via navbar form, revisit `/saved-trails`, login form returns and protected DOM does not leak
+
+**Run locally:**
+
+```bash
+pip install -r requirements.txt
+python -m playwright install --with-deps chromium
+TESTING=1 SECRET_KEY=test-secret-e2e pytest tests/e2e/test_protected_routes.py -v
+```
+
+Or the full e2e folder (includes Liam and Ryan's tests):
+
+```bash
+TESTING=1 SECRET_KEY=test-secret-e2e pytest tests/e2e -v
+```
+
+**Week 6 walkthrough adapted:** `e2e/db-and-security.md` (manual Postgres + browser walk; complementary to this automated Playwright test)
+
+**Part 3 — `tests/e2e/test_full_lifecycle.py` (scenarios 3 & 4)**
+
+**What they verify:**
+
+1. **Scenario 3 — CSRF** — authenticated user sends tokenless `POST /logout`; session remains valid and `/saved-trails` still accessible
+2. **Scenario 4 — Session expiry** — after shortened `PERMANENT_SESSION_LIFETIME`, `/saved-trails` redirects to login form with no protected DOM leak
+
+**Run locally:**
+
+```bash
+TESTING=1 SECRET_KEY=test-secret-e2e pytest tests/e2e/test_full_lifecycle.py::test_csrf_rejects_post_without_token tests/e2e/test_full_lifecycle.py::test_session_expires_and_blocks_protected_page -v
+```
+
+### Known gaps
+
+**Part 2 (`test_protected_routes.py`):**
+
+- **No real GitHub OAuth** — Ryan's `test_server_oauth_login.py` and Liam's `test_client_oauth_ux.py` cover the backdoor/OAuth UX path; Part 2 uses password registration intentionally
+- **Does not assert `oauth_identity` rows in the browser** — covered by unit tests in `tests/test_db_security.py` and Ryan's OAuth callback / Part 3 scenarios 1–2
+- **Navbar assertion uses username substring** in Part 2, not the full `Logged in as {username}` string
+
+**Part 3 (scenarios 3 & 4):**
+
+- **CSRF tested only on `POST /logout`** — other state-changing routes (`POST /saved-trails`, `/register`) not covered; CSRF is forced on for this test only because `TESTING=1` disables it globally
+- **Session expiry uses wall-clock sleep** — not time mocking; remember-me cookie (30-day path) and `SESSION_PROTECTION="strong"` IP/UA mismatch not tested
+
