@@ -47,22 +47,18 @@ Current non-e2e result:
 
 `44 passed, 1 warning`
 
-### Playwright status
+### Playwright test
 
-The required Playwright test for my client-side slice depends on Ryan's Week 7 routes:
+**File:** `tests/e2e/test_client_oauth_ux.py`
 
-- `/login/github`
-- `/test/login/<username>`
+**What it verifies:** A logged-out user opens `/login`, sees and clicks **Sign in with GitHub**, then the test accepts either the external GitHub redirect or the `TESTING=1` not-configured fallback. The test then uses `/test/login/LiamCase` to stand in for the completed OAuth session, verifies the user lands on `/saved-trails`, verifies the navbar shows `Logged in as LiamCase`, clicks **Logout**, and verifies the user returns to `/login`.
 
-Those routes are not present in my branch yet, so I did not add the final Playwright test in this commit. Once Ryan's OAuth initiator route and test-login backdoor land, my Playwright test should cover this user-visible flow:
+**Run locally:**
 
-1. logged-out user opens `/login`
-2. user sees and clicks **Sign in with GitHub**
-3. test completes login through `/test/login/<username>`
-4. user lands on `/saved-trails`
-5. navbar shows `Logged in as {username}`
-6. user clicks **Logout**
-7. user lands on `/login`
+`docker compose exec app pytest tests/e2e -v`
+
+Current result: `2 passed`
+
 
 ### Known gaps
 
