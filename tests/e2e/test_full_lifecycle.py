@@ -59,7 +59,18 @@ def count_oauth_identities(provider: str, provider_user_id: str) -> int:
 
 def test_first_time_oauth_creates_identity(page: Page, live_server):
     """Ryan — first login via backdoor; post-login page; exactly one oauth_identity row."""
-    pytest.skip("Ryan: implement scenario 1 (see provider_user_id_for_backdoor / backdoor note)")
+    import uuid
+
+    username = f"ryan_part3_{uuid.uuid4().hex[:8]}"
+    provider_user_id = provider_user_id_for_backdoor(username)
+
+    # First-time login contract: identity does not exist before login.
+    assert count_oauth_identities(PROVIDER, provider_user_id) == 0
+
+    login_via_backdoor(page, live_server, username=username)
+
+    # After login via backdoor, exactly one identity row must exist.
+    assert count_oauth_identities(PROVIDER, provider_user_id) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +80,16 @@ def test_first_time_oauth_creates_identity(page: Page, live_server):
 
 def test_returning_oauth_reuses_identity(page: Page, live_server):
     """Ryan — logout and log in again; oauth_identity count stays 1."""
-    pytest.skip("Ryan: implement scenario 2")
+    username = LIFECYCLE_USERNAME
+    provider_user_id = provider_user_id_for_backdoor(username)
+
+    login_via_backdoor(page, live_server, username=username)
+    assert count_oauth_identities(PROVIDER, provider_user_id) == 1
+
+    logout_via_ui(page, live_server)
+
+    login_via_backdoor(page, live_server, username=username)
+    assert count_oauth_identities(PROVIDER, provider_user_id) == 1
 
 
 # ---------------------------------------------------------------------------

@@ -768,6 +768,8 @@ The OAuth `state` parameter MUST be validated using Authlib's built-in mechanism
 
 A single-gate guard is insufficient: one misconfigured deploy with `TESTING=1` leaked into production is total compromise.
 
+For Part 3 lifecycle tests, this route also mirrors OAuth create/link persistence: it creates or reuses `oauth_identity` with `provider="github"` and synthetic `provider_user_id="test-<username>"`. This keeps first-time/returning lifecycle assertions aligned with §7a.14 behavior without calling GitHub.
+
 ### 7a.7 Session and cookie lifetimes (Nick N4)
 
 * `PERMANENT_SESSION_LIFETIME` = 12 hours. Applied by setting `session.permanent = True` after every `login_user(...)` call.
