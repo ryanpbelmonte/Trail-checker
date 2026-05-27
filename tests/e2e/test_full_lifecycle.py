@@ -9,15 +9,22 @@ backdoor /test/login/<username> per CONTRACTS.md §7a.6.
 
 from __future__ import annotations
 
+import time
+from datetime import timedelta
+
 import pytest
 from playwright.sync_api import Page, expect
 from sqlmodel import Session, select
 
-from app import OAuthIdentity, engine
+from app import OAuthIdentity, app, engine
 
 # Stable identity for scenarios 1–2 (Ryan). Use a fresh username per run if needed.
 LIFECYCLE_USERNAME = "lifecycle_part3"
 PROVIDER = "github"
+
+# Distinct usernames for Nick's scenarios so Ryan's lifecycle_part3 rows are untouched.
+CSRF_TEST_USER = "csrf_lifecycle"
+SESSION_EXPIRY_USER = "session_expiry_lifecycle"
 
 # When the backdoor creates oauth_identity rows, use a deterministic provider_user_id.
 # Until then, scenarios 1–2 may need a small app.py change on the backdoor route.
@@ -79,7 +86,28 @@ def test_returning_oauth_reuses_identity(page: Page, live_server):
 
 def test_csrf_rejects_post_without_token(page: Page, live_server):
     """Nick — tokenless POST via page.request (or playwright.request) → rejected."""
-    pytest.skip("Nick: implement scenario 3 — e.g. page.request.post(.../logout, data={})")
+    login_via_backdoor(page, live_server, CSRF_TEST_USER)
+
+    # E2e runs with TESTING=1, which disables CSRF globally. Turn it on for this
+    # scenario only so we exercise the real CSRFProtect path (§7a.9).
+    prev_csrf = app.config["WTF_CSRF_ENABLED"]
+    app.config["WTF_CSRF_ENABLED"] = True
+    try:
+        response = page.request.post(
+            f"{live_server.url}/logout",
+            data={},
+            max_redirects=0,
+        )
+        # Authenticated CSRF failure redirects to home (302); some stacks return 400.
+        assert response.status in (302, 400)
+
+        # Regression: logout did NOT happen — session still authenticates.
+        page.goto(f"{live_server.url}/saved-trails")
+        expect(page).to_have_url(f"{live_server.url}/saved-trails")
+        expect(page.get_by_text("Your saved locations")).to_be_visible()
+        expect(page.get_by_text(f"Logged in as {CSRF_TEST_USER}")).to_be_visible()
+    finally:
+        app.config["WTF_CSRF_ENABLED"] = prev_csrf
 
 
 # ---------------------------------------------------------------------------
@@ -89,4 +117,17 @@ def test_csrf_rejects_post_without_token(page: Page, live_server):
 
 def test_session_expires_and_blocks_protected_page(page: Page, live_server):
     """Nick — short PERMANENT_SESSION_LIFETIME in test; /saved-trails inaccessible after expiry."""
-    pytest.skip("Nick: implement scenario 4")
+    prev_lifetime = app.config["PERMANENT_SESSION_LIFETIME"]
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(seconds=2)
+    try:
+        login_via_backdoor(page, live_server, SESSION_EXPIRY_USER)
+
+        # Wall-clock wait past the shortened lifetime (buffer for CI).
+        time.sleep(3)
+
+        page.goto(f"{live_server.url}/saved-trails")
+        expect(page.locator("form[action$='/login']")).to_be_visible()
+        expect(page.get_by_text("Your saved locations")).to_have_count(0)
+        expect(page.locator("nav")).not_to_contain_text(SESSION_EXPIRY_USER)
+    finally:
+        app.config["PERMANENT_SESSION_LIFETIME"] = prev_lifetime
