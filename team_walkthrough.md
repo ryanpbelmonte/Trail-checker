@@ -68,15 +68,16 @@ This validates the app's post-OAuth local persistence behavior in test mode. It 
 
 ### User-visible behavior
 
-A browser/request attempts to submit a state-changing POST without a CSRF token. The app should reject the request rather than performing the action.
+The test logs in through the backdoor as `csrf_lifecycle`, then sends a direct POST request to `/logout` without a CSRF token. The app rejects the tokenless POST instead of logging the user out. After the rejected request, the browser can still visit `/saved-trails`, the saved-trails page still renders, and the navbar still shows `Logged in as csrf_lifecycle`.
 
 ### Regression this catches
 
-This catches accidental weakening of CSRF protection, especially if a new POST route is added without token validation or if CSRF is accidentally disabled outside the intended testing setup.
+This catches accidental weakening of CSRF protection on state-changing POST routes. If `/logout` accepted a POST without a CSRF token, the user would be logged out and the follow-up visit to `/saved-trails` would fail.
 
 ### Known gap
 
-TODO: Fill in after Nick implements the exact route/request used by this scenario.
+This scenario verifies CSRF rejection on `/logout` as the representative state-changing form. It does not exhaustively test every future POST route; new POST routes still need their own CSRF-aware forms and tests when added.
+
 
 ## Scenario 4: Expired session blocks protected page access
 
@@ -86,15 +87,16 @@ TODO: Fill in after Nick implements the exact route/request used by this scenari
 
 ### User-visible behavior
 
-A user logs in, but the test uses a shortened session lifetime. After the session expires, visiting a protected page such as `/saved-trails` should no longer show the protected content and should require login again.
+The test temporarily shortens `PERMANENT_SESSION_LIFETIME`, logs in through the backdoor as `session_expiry_lifecycle`, waits past the shortened lifetime, then tries to visit `/saved-trails`. The protected saved-trails content should no longer render, the login form should appear instead, and the navbar should no longer show the expired username.
 
 ### Regression this catches
 
-This catches bugs where expired sessions are still treated as authenticated, protected pages remain accessible too long, or Flask-Login/session lifetime settings are not respected.
+This catches bugs where expired sessions are still treated as authenticated, protected pages remain visible after session expiry, or the app ignores the configured session lifetime.
 
 ### Known gap
 
-TODO: Fill in after Nick implements the exact session-expiry mechanism and timing approach.
+This test uses a short test-only lifetime and a small wall-clock wait. It verifies the app's session-expiry behavior in the e2e test environment, but it does not cover every browser cookie edge case or long-running production session scenario.
+
 
 ## Overall suite gaps
 
