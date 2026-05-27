@@ -443,6 +443,61 @@ def _username_from_github_user(db: Session, github_user: dict, provider_user_id:
     return _unique_username(db, f"github-{provider_user_id}")
 
 
+def find_or_create_user_from_test_backdoor(db: Session, username: str) -> User:
+    """§7a.6 — mirror OAuth create/link semantics in test mode.
+
+    Part 3 scenarios 1-2 assert oauth_identity row creation/reuse through
+    /test/login/<username>. We use a deterministic synthetic provider_user_id
+    so repeated logins map to one identity row.
+    """
+    provider = "github"
+    provider_user_id = f"test-{username}"
+
+    identity = db.exec(
+        select(OAuthIdentity).where(
+            OAuthIdentity.provider == provider,
+            OAuthIdentity.provider_user_id == provider_user_id,
+        )
+    ).first()
+    if identity is not None:
+        user = db.get(User, identity.user_id)
+        if user is None:
+            raise RuntimeError("oauth_identity references missing user")
+        return user
+
+    user = db.exec(select(User).where(User.username == username)).first()
+    if user is None:
+        user = User(username=username, password_hash=None)
+        db.add(user)
+        db.flush()
+
+    db.add(
+        OAuthIdentity(
+            user_id=user.id,
+            provider=provider,
+            provider_user_id=provider_user_id,
+        )
+    )
+    try:
+        db.commit()
+        db.refresh(user)
+        return user
+    except IntegrityError:
+        db.rollback()
+        identity = db.exec(
+            select(OAuthIdentity).where(
+                OAuthIdentity.provider == provider,
+                OAuthIdentity.provider_user_id == provider_user_id,
+            )
+        ).first()
+        if identity is None:
+            raise
+        user = db.get(User, identity.user_id)
+        if user is None:
+            raise RuntimeError("oauth_identity references missing user")
+        return user
+
+
 def find_or_create_user_from_github(db: Session, github_user: dict) -> User | None:
     """§7a.3 / §7a.14 — transactional lookup-or-create on OAuthIdentity."""
     if github_user.get("id") is None:
@@ -667,12 +722,7 @@ def test_login(username: str):
         abort(404)
 
     db = get_db_session()
-    user = db.exec(select(User).where(User.username == cleaned)).first()
-    if user is None:
-        user = User(username=cleaned, password_hash=None)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+    user = find_or_create_user_from_test_backdoor(db, cleaned)
 
     _login_user_after_oauth(user)
     return redirect(url_for("saved_trails"))
