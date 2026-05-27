@@ -191,7 +191,7 @@ Facilitator: Ryan Belmonte.
 
 ### Context
 
-Week 7 adds GitHub OAuth, Playwright browser-driven E2E tests, and session hardening. Cache Kings is a three-person team without a dedicated coordinator, so Part 1 contract work is shared. Ryan ran a pre-decided, role-blocked checklist in Discord (the "APPROVE YOUR BLOCK" message) instead of a live planning call to fit the 3-day window over a holiday weekend.
+Week 7 adds GitHub OAuth, Playwright browser-driven E2E tests, and session hardening. Cache Kings is a three-person team without a dedicated coordinator, so Part 1 contract work is shared. Ryan shared a role-blocked checklist in Discord for team review/approval instead of a live planning call, to fit the 3-day window over a holiday weekend.
 
 ### Approval status
 
@@ -226,6 +226,8 @@ These are the places where one role's work depends on or constrains another's. T
 - §7a.7 originally said "OAuth login is always `remember=True`." Team-agreed L5 says remember-me is on the password form only and OAuth uses the normal session lifetime. The OAuth bullet has been rewritten in §7a.7 (Ryan's implementation will call `login_user(user)` followed by `session.permanent = True`, **without** `remember=True`). This is noted explicitly so the contract and implementation agree.
 
 - Nick's earlier "Coordination items for Ryan" bullet that read *"OAuth login: always call `login_user(user, remember=True)`"* is superseded by the resolved §7a.7. Kept as-is in Nick's implementation-notes section above for historical accuracy; the authoritative spec is §7a.7 as edited.
+
+- §7a.13 originally required missing `GITHUB_OAUTH_*` env to fail at startup with no exception; implementation and CI need `TESTING=1` runs without a GitHub app (backdoor e2e). §7a.13 Errors now split production (fail on import) vs `TESTING=1` (OAuth optional; `/login/github` flashes to `/login`). Ryan PR #18.
 
 ### Pushback / decisions deliberately deferred to a later week
 

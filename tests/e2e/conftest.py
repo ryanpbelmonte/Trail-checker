@@ -17,20 +17,30 @@ in-process, but it cannot be reached by a separately-launched server
 process.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import tempfile
+import threading
+import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
+
+import pytest
+from werkzeug.serving import make_server
 
 
 _E2E_DB_PATH = (
     Path(tempfile.gettempdir()) / f"trail_checker_e2e_{uuid.uuid4().hex}.db"
 )
 
-os.environ.setdefault("TESTING", "1")
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{_E2E_DB_PATH}")
-os.environ.setdefault("SECRET_KEY", "test-secret-e2e")
+# Override tests/conftest.py in-memory SQLite — Playwright hits a real server
+# process that opens its own connections; file-backed DB is shared across them.
+os.environ["TESTING"] = "1"
+os.environ["DATABASE_URL"] = f"sqlite:///{_E2E_DB_PATH}"
+os.environ["SECRET_KEY"] = "test-secret-e2e"
 
 sys.path.insert(
     0,
@@ -38,6 +48,13 @@ sys.path.insert(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ),
 )
+
+
+@dataclass(frozen=True)
+class LiveServer:
+    """Base URL for the threaded Werkzeug server used by Playwright tests."""
+
+    url: str
 
 
 def pytest_sessionstart(session):
@@ -54,3 +71,30 @@ def pytest_sessionfinish(session, exitstatus):
             _E2E_DB_PATH.unlink()
     except OSError:
         pass
+
+
+@pytest.fixture(scope="session")
+def browser_type_launch_args():
+    return {"headless": True}
+
+
+@pytest.fixture(scope="session")
+def live_server():
+    """Run the real Flask app in a background thread for browser-driven tests."""
+    from app import app, engine
+    from sqlmodel import SQLModel
+
+    SQLModel.metadata.create_all(engine)
+    app.config["TESTING"] = True
+
+    httpd = make_server("127.0.0.1", 0, app)
+    port = httpd.server_port
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.3)
+
+    base_url = f"http://127.0.0.1:{port}"
+    yield LiveServer(url=base_url)
+
+    httpd.shutdown()
+    thread.join(timeout=5)
