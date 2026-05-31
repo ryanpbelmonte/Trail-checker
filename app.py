@@ -53,6 +53,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import SQLModel, Field, Session, create_engine, select
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from weather_service import (
     GeocodeNotFoundError,
@@ -67,6 +68,7 @@ TESTING = os.environ.get("TESTING") == "1"
 
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-not-for-production")

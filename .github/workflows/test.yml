@@ -42,9 +42,9 @@ jobs:
       - name: Install Playwright browsers
         run: python -m playwright install --with-deps chromium
 
-      - name: Run unit/integration tests (exclude e2e)
+      - name: Run unit/integration tests (exclude e2e and docker integration)
         run: |
-          TESTING=1 SECRET_KEY=test-secret pytest -v --ignore=tests/e2e
+          TESTING=1 SECRET_KEY=test-secret pytest -v --ignore=tests/e2e -m "not integration"
 
       - name: Run Playwright e2e tests
         run: |

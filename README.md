@@ -52,13 +52,37 @@ We chose this project because it gives each team member a clear technical area w
 
 This project also gives us practice with real production concerns: rate limits, API keys, fallback behavior, partial failures, and clean data presentation. Those skills transfer well to many types of software projects, including backend systems, platform engineering, data tools, and public-facing web apps.
 
-## Running locally
+## Running the production stack (Week 8)
+
+nginx terminates TLS and proxies to gunicorn on the internal Docker network.
+Postgres is not published to the host (§13 trust boundary).
+
+1. Copy `.env.example` to `.env` and set secrets (`SECRET_KEY`, `OPENWEATHER_API_KEY`, GitHub OAuth).
+2. Register GitHub OAuth callback: `https://localhost/auth/github/callback`
+3. Generate a self-signed cert (one-time, not committed):
 
 ```bash
-docker compose up -d
+mkdir -p nginx/certs
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout nginx/certs/key.pem -out nginx/certs/cert.pem \
+  -days 365 -subj "/CN=localhost"
 ```
 
-The Flask app is available at `http://localhost:5000`.
+4. Start the stack:
+
+```bash
+docker compose up --build -d
+```
+
+5. Open **https://localhost** (accept the browser warning for the self-signed cert).
+
+### Attack-path test (nginx edge, §10)
+
+With the stack running:
+
+```bash
+pytest tests/test_attack_paths.py -v -m integration
+```
 
 ## Resetting the database
 
@@ -84,6 +108,14 @@ Skipping `-v` will silently keep the previous schema and the new constraints wil
 
 ## Running tests
 
+Unit and integration tests (no Docker stack required):
+
 ```bash
-pytest -v
+TESTING=1 SECRET_KEY=test-secret pytest -v --ignore=tests/e2e -m "not integration"
+```
+
+Playwright e2e tests:
+
+```bash
+TESTING=1 SECRET_KEY=test-secret-e2e pytest -v tests/e2e
 ```
