@@ -36,4 +36,5 @@ nginx/certs/*.pem
 
 # Local-only: assignment/study guides and duplicate contract mirror (not for team remote)
 docs/
+week8_study_guide-final.md
 contracts/CONTRACTS.md
