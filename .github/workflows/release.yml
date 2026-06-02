@@ -1,0 +1,26 @@
+# Tag-driven release — Week 8 (Nick / §16). Fill in registry + deploy targets.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests before release
+        run: |
+          pip install -r requirements.txt
+          TESTING=1 SECRET_KEY=test-secret pytest -v --ignore=tests/e2e -m "not integration"
+
+      # TODO: build/push image — secrets via ${{ secrets.DOCKERHUB_TOKEN }}
+      # TODO: deploy step — never echo secrets (§15)

@@ -31,6 +31,10 @@ instance/
 # Local logs (e.g. audit log output if the team wires a FileHandler)
 *.log
 
+# Week 8 — self-signed TLS material (§7); regenerate per environment
+nginx/certs/*.pem
+
 # Local-only: assignment/study guides and duplicate contract mirror (not for team remote)
 docs/
+week8_study_guide-final.md
 contracts/CONTRACTS.md

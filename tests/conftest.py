@@ -20,3 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("TESTING", "1")
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "integration: requires docker production stack on https://localhost",
+    )
