@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="py-4">
+<section class="py-4" data-saved-trails-page data-csrf-token="{{ csrf_token() }}">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
         <div>
             <span class="badge text-bg-success mb-2">Saved Trails</span>
@@ -16,34 +16,115 @@
         </a>
     </div>
 
-    {% if saved_trails %}
+    {% if trail_entries %}
     <div class="row g-4">
-        {% for trail in saved_trails %}
-        <div class="col-md-6 col-lg-4">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body">
-                    <h2 class="h5 card-title">{{ trail.display_name }}</h2>
+        {% for entry in trail_entries %}
+        {% set trail = entry.trail %}
+        {% set latest = entry.latest %}
+        <div class="col-12">
+            <div class="card saved-trail-card shadow-sm h-100" data-saved-trail-id="{{ trail.id }}">
+                <div class="card-body p-4">
+                    <div class="alert alert-warning d-none mb-3" data-recheck-error role="alert"></div>
 
-                    <p class="text-muted small mb-2">
-                        Original search: {{ trail.query_text }}
-                    </p>
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-3 mb-3">
+                        <div>
+                            <h2 class="h5 card-title mb-1">{{ trail.display_name }}</h2>
+                            <p class="text-muted mb-1">{{ entry.location_line }}</p>
+                            {% if trail.query_text|lower != trail.display_name|lower %}
+                            <p class="small text-muted mb-0">
+                                <span class="fw-semibold">Search:</span> {{ trail.query_text }}
+                            </p>
+                            {% endif %}
+                        </div>
 
-                    <p class="small mb-3">
-                        {{ trail.latitude }}, {{ trail.longitude }}
+                        <div data-recheck-recommendation data-testid="saved-trail-recommendation" class="{% if not latest %}d-none{% endif %}">
+                            {% if latest %}
+                            {% if latest.recommendation == "good" %}
+                            <span class="badge text-bg-success fs-6 px-3 py-2">Good</span>
+                            {% elif latest.recommendation == "caution" %}
+                            <span class="badge text-bg-warning fs-6 px-3 py-2">Use Caution</span>
+                            {% elif latest.recommendation == "poor" %}
+                            <span class="badge text-bg-danger fs-6 px-3 py-2">Poor</span>
+                            {% else %}
+                            <span class="badge text-bg-secondary fs-6 px-3 py-2">Unknown</span>
+                            {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div data-recheck-conditions class="row g-3 mb-3 {% if not latest %}d-none{% endif %}">
+                        <div class="col-md-4">
+                            <div class="border rounded-3 p-3 h-100 bg-light">
+                                <h3 class="h6 fw-bold mb-2">Weather</h3>
+                                <div data-recheck-weather>
+                                    {% if latest %}
+                                    <p class="mb-1">
+                                        <strong>{{ latest.weather_main }}</strong>
+                                        <span class="text-muted">— {{ latest.weather_description }}</span>
+                                    </p>
+                                    <p class="small mb-0">{{ latest.temp_f|round(0)|int }} °F
+                                        {% if latest.wind_mph is not none %}
+                                        · Wind {{ latest.wind_mph|round(1) }} mph
+                                        {% endif %}
+                                    </p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="border rounded-3 p-3 h-100 bg-light">
+                                <h3 class="h6 fw-bold mb-2">Air quality</h3>
+                                <div data-recheck-air>
+                                    {% if latest %}
+                                    {% if latest.aqi is not none %}
+                                    <p class="mb-0">AQI {{ latest.aqi }}
+                                        {% if latest.pm2_5 is not none %}
+                                        <span class="text-muted">· PM2.5 {{ latest.pm2_5 }}</span>
+                                        {% endif %}
+                                    </p>
+                                    {% else %}
+                                    <p class="small text-muted mb-0">No AQI data on last check.</p>
+                                    {% endif %}
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="border rounded-3 p-3 h-100 bg-light">
+                                <h3 class="h6 fw-bold mb-2">Details</h3>
+                                <p class="small text-muted mb-1" data-recheck-saved-at>
+                                    {% if latest %}Saved {{ trail.created_at.strftime('%b %d, %Y') }}{% endif %}
+                                </p>
+                                <p class="small text-muted mb-0" data-recheck-checked-at>
+                                    {% if latest %}
+                                    Last checked {{ latest.checked_at.strftime('%b %d, %Y at %I:%M %p') }} UTC
+                                    {% endif %}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p data-recheck-empty class="text-muted small mb-3 {% if latest %}d-none{% endif %}">
+                        No conditions stored yet for this location. Use <strong>Re-check</strong> to fetch current weather and air quality.
                     </p>
 
                     {% if trail.notes %}
-                    <p class="small border rounded-3 p-2 bg-light">
-                        {{ trail.notes }}
+                    <p class="small border rounded-3 p-2 bg-light mb-3">
+                        <span class="fw-semibold">Note:</span> {{ trail.notes }}
                     </p>
                     {% endif %}
 
                     <div class="d-flex gap-2 flex-wrap">
-                        <a href="/saved-trails/{{ trail.id }}/check" class="btn btn-outline-primary btn-sm">
-                            Re-check
-                        </a>
+                        <button
+                            type="button"
+                            class="btn btn-primary btn-sm"
+                            data-recheck-btn
+                            data-trail-id="{{ trail.id }}"
+                        >
+                            Re-check conditions
+                        </button>
 
-                        <form method="POST" action="/saved-trails/{{ trail.id }}/delete">
+                        <form method="POST" action="/saved-trails/{{ trail.id }}/delete" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-outline-danger btn-sm">
                                 Delete
@@ -69,4 +150,8 @@
     </div>
     {% endif %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/saved_trails.js') }}"></script>
 {% endblock %}

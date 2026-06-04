@@ -118,11 +118,6 @@
         {% if not is_saved %}
         <div class="card border-0 shadow-sm mt-4">
             <div class="card-body">
-                <h2 class="h5 fw-bold">Save this location</h2>
-                <p class="text-muted">
-                    Save this location so you can re-check conditions faster later.
-                </p>
-
                 <form method="POST" action="/saved-trails">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="display_name" value="{{ resolved_name }}">

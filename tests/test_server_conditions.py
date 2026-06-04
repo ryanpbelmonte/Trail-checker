@@ -187,3 +187,83 @@ def test_saved_trail_recheck_uses_coordinates_without_geocoding(client):
     with Session(engine) as db:
         saved = db.exec(select(SavedTrail)).first()
     assert saved is not None
+
+
+@responses.activate
+def test_saved_trail_recheck_json_updates_without_navigation(client):
+    """POST /recheck returns JSON for in-page saved-trails refresh."""
+    client.post("/register", data={"username": "hiker2", "password": "password123"})
+    client.post(
+        "/saved-trails",
+        data={
+            "display_name": "Mount Rainier",
+            "query_text": "Mount Rainier",
+            "latitude": "46.8523",
+            "longitude": "-121.7603",
+            "country": "US",
+            "state": "Washington",
+        },
+    )
+    add_openweather_responses(include_geocode=False)
+
+    response = client.post("/saved-trails/1/recheck")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["data"]["recommendation"] in ("good", "caution", "poor", "unknown")
+    assert payload["data"]["weather_main"]
+    assert "checked_at" in payload["data"]
+
+
+def test_saved_trails_sorted_by_recommendation_best_first(client):
+    """Saved-trails list orders Good before Caution before Poor; no check last."""
+    from sqlmodel import Session, select
+
+    from app import SavedTrail, TrailCheck, User
+
+    client.post("/register", data={"username": "sorter", "password": "password123"})
+
+    fixtures = [
+        ("Poor Peak", "poor", 48.0, -120.0),
+        ("Good Ridge", "good", 47.0, -121.0),
+        ("Caution Cove", "caution", 46.0, -122.0),
+        ("No Check Yet", None, 45.0, -123.0),
+    ]
+
+    with Session(engine) as db:
+        user = db.exec(select(User).where(User.username == "sorter")).first()
+        assert user is not None
+        for name, recommendation, lat, lon in fixtures:
+            trail = SavedTrail(
+                user_id=user.id,
+                display_name=name,
+                query_text=name,
+                latitude=lat,
+                longitude=lon,
+            )
+            db.add(trail)
+            db.commit()
+            db.refresh(trail)
+            if recommendation:
+                db.add(
+                    TrailCheck(
+                        user_id=user.id,
+                        query_text=name,
+                        resolved_name=name,
+                        latitude=lat,
+                        longitude=lon,
+                        weather_main="Clear",
+                        weather_description="clear sky",
+                        temp_f=60.0,
+                        recommendation=recommendation,
+                    )
+                )
+        db.commit()
+
+    response = client.get("/saved-trails")
+    assert response.status_code == 200
+    body = response.data.decode()
+    assert body.index("Good Ridge") < body.index("Caution Cove")
+    assert body.index("Caution Cove") < body.index("Poor Peak")
+    assert body.index("Poor Peak") < body.index("No Check Yet")

@@ -752,6 +752,51 @@ def _current_user_id_or_none() -> int | None:
     return None
 
 
+RECOMMENDATION_SORT_RANK = {
+    "good": 4,
+    "caution": 3,
+    "poor": 2,
+    "unknown": 1,
+}
+
+
+def _saved_trail_sort_key(entry: dict) -> tuple:
+    """Sort saved-trails list: best recommendation first, then newest save."""
+    latest = entry["latest"]
+    rank = RECOMMENDATION_SORT_RANK.get(latest.recommendation, 0) if latest else 0
+    created = entry["trail"].created_at
+    created_ts = created.timestamp() if created.tzinfo else created.replace(tzinfo=timezone.utc).timestamp()
+    return (rank, created_ts)
+
+
+def _format_saved_location(trail: SavedTrail) -> str:
+    """Human-readable place line from geocoding fields or coordinates."""
+    parts = []
+    if trail.state:
+        parts.append(trail.state)
+    if trail.country:
+        parts.append(trail.country)
+    if parts:
+        return ", ".join(parts)
+    return f"{trail.latitude:.2f}, {trail.longitude:.2f}"
+
+
+def _latest_trail_check_for_saved(
+    db: Session, user_id: int, trail: SavedTrail
+) -> TrailCheck | None:
+    """Most recent conditions snapshot for this saved coordinates (same user)."""
+    return db.exec(
+        select(TrailCheck)
+        .where(
+            TrailCheck.user_id == user_id,
+            TrailCheck.latitude == trail.latitude,
+            TrailCheck.longitude == trail.longitude,
+        )
+        .order_by(TrailCheck.checked_at.desc())
+        .limit(1)
+    ).first()
+
+
 def _is_saved_trail(
     db: Session,
     user_id: int | None,
@@ -794,6 +839,45 @@ def _create_trail_check(db: Session, data: dict, user_id: int | None) -> TrailCh
     db.commit()
     db.refresh(trail_check)
     return trail_check
+
+
+def _serialize_saved_trail_check(trail: SavedTrail, trail_check: TrailCheck) -> dict:
+    """JSON-friendly snapshot for in-page saved-trails recheck."""
+    return {
+        "recommendation": trail_check.recommendation,
+        "weather_main": trail_check.weather_main,
+        "weather_description": trail_check.weather_description,
+        "temp_f": trail_check.temp_f,
+        "wind_mph": trail_check.wind_mph,
+        "aqi": trail_check.aqi,
+        "pm2_5": trail_check.pm2_5,
+        "checked_at": trail_check.checked_at.strftime("%b %d, %Y at %I:%M %p") + " UTC",
+        "saved_at": trail.created_at.strftime("%b %d, %Y"),
+    }
+
+
+def _recheck_saved_trail(
+    db: Session, trail: SavedTrail, user_id: int
+) -> TrailCheck:
+    """Fetch live conditions for a saved trail and persist a trail_checks row."""
+    data = get_conditions_for_coordinates(
+        trail.query_text,
+        trail.display_name,
+        trail.latitude,
+        trail.longitude,
+        country=trail.country,
+        state=trail.state,
+    )
+    return _create_trail_check(db, data, user_id)
+
+
+def _get_owned_saved_trail(db: Session, trail_id: int, user_id: int) -> SavedTrail | None:
+    return db.exec(
+        select(SavedTrail).where(
+            SavedTrail.id == trail_id,
+            SavedTrail.user_id == user_id,
+        )
+    ).first()
 
 
 def _render_trail_checker_error(message: str, query_text: str = ""):
@@ -877,10 +961,20 @@ def saved_trails():
         .order_by(SavedTrail.created_at.desc())
     ).all()
 
+    trail_entries = [
+        {
+            "trail": trail,
+            "latest": _latest_trail_check_for_saved(db, current_user.id, trail),
+            "location_line": _format_saved_location(trail),
+        }
+        for trail in trails
+    ]
+    trail_entries.sort(key=_saved_trail_sort_key, reverse=True)
+
     prior_input = session.pop("saved_trail_form", None)
     return render_template(
         "saved_trails.html",
-        saved_trails=trails,
+        trail_entries=trail_entries,
         prior_input=prior_input,
     )
 
@@ -995,16 +1089,55 @@ def delete_saved_trail(trail_id: int):
     return redirect(url_for("saved_trails"))
 
 
+@app.route("/saved-trails/<int:trail_id>/recheck", methods=["POST"])
+@login_required
+def recheck_saved_trail(trail_id: int):
+    """In-page recheck: returns JSON so saved-trails cards update without navigation."""
+    db = get_db_session()
+    trail = _get_owned_saved_trail(db, trail_id, current_user.id)
+
+    if trail is None:
+        audit(
+            "saved_trail.check.denied",
+            actor_id=current_user.id,
+            target_trail_id=trail_id,
+        )
+        return _json_error("not_found", "Saved trail not found.", 404)
+
+    try:
+        trail_check = _recheck_saved_trail(db, trail, current_user.id)
+    except ExternalAPIError:
+        return _json_error(
+            "external_api_error",
+            "Weather data was malformed. Try again later.",
+            502,
+        )
+    except ExternalAPIUnavailableError:
+        return _json_error(
+            "external_api_unavailable",
+            "External weather service is unavailable. Try again later.",
+            503,
+        )
+
+    audit(
+        "saved_trail.recheck",
+        user_id=current_user.id,
+        trail_id=trail_id,
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": _serialize_saved_trail_check(trail, trail_check),
+        }
+    )
+
+
 @app.route("/saved-trails/<int:trail_id>/check", methods=["GET"])
 @login_required
 def check_saved_trail(trail_id: int):
+    """Full results page (e.g. bookmark); saved-trails UI uses POST /recheck instead."""
     db = get_db_session()
-    trail = db.exec(
-        select(SavedTrail).where(
-            SavedTrail.id == trail_id,
-            SavedTrail.user_id == current_user.id,
-        )
-    ).first()
+    trail = _get_owned_saved_trail(db, trail_id, current_user.id)
 
     db.get(User, current_user.id)
 
@@ -1017,20 +1150,37 @@ def check_saved_trail(trail_id: int):
         abort(404)
 
     try:
-        data = get_conditions_for_coordinates(
-            trail.query_text,
-            trail.display_name,
-            trail.latitude,
-            trail.longitude,
-            country=trail.country,
-            state=trail.state,
-        )
+        trail_check = _recheck_saved_trail(db, trail, current_user.id)
     except ExternalAPIError:
         flash("Weather data was malformed. Try again later.")
         return redirect(url_for("saved_trails"))
     except ExternalAPIUnavailableError:
         flash("External weather service is unavailable. Try again later.")
         return redirect(url_for("saved_trails"))
+
+    data = {
+        "query_text": trail.query_text,
+        "resolved_name": trail.display_name,
+        "latitude": trail.latitude,
+        "longitude": trail.longitude,
+        "weather": {
+            "main": trail_check.weather_main,
+            "description": trail_check.weather_description,
+            "temp_f": trail_check.temp_f,
+            "feels_like_f": trail_check.feels_like_f,
+            "humidity": trail_check.humidity,
+            "wind_mph": trail_check.wind_mph,
+            "visibility_meters": trail_check.visibility_meters,
+        },
+        "air_quality": {
+            "aqi": trail_check.aqi,
+            "pm2_5": trail_check.pm2_5,
+            "pm10": trail_check.pm10,
+        },
+        "recommendation": trail_check.recommendation,
+        "country": trail.country,
+        "state": trail.state,
+    }
 
     return render_template(
         "trail_results.html",

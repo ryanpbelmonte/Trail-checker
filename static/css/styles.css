@@ -11,3 +11,7 @@ body {
 main {
     flex: 1;
 }
+
+.saved-trail-card {
+    border-left: 4px solid var(--bs-success);
+}
