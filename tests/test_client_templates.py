@@ -33,8 +33,8 @@ def client():
 
 
 def test_trail_checker_page_has_search_form(client):
-    """The Trail Checker page exposes the agreed search form."""
-    response = client.get("/trail-checker")
+    """The home page exposes the agreed search form."""
+    response = client.get("/")
 
     assert response.status_code == 200
     assert b'action="/trail-checker/results"' in response.data
@@ -43,12 +43,23 @@ def test_trail_checker_page_has_search_form(client):
     assert b'type="submit"' in response.data
 
 
-def test_base_nav_links_to_trail_checker(client):
-    """The shared navbar includes a link to the Trail Checker page."""
+def test_trail_checker_legacy_path_redirects_home(client):
+    """Old /trail-checker URL redirects to home."""
+    response = client.get("/trail-checker", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert "/" in response.headers.get("Location", "")
+
+
+def test_base_nav_brand_links_home(client):
+    """The navbar brand links to the home (trail checker) page."""
     response = client.get("/")
 
     assert response.status_code == 200
-    assert b'href="/trail-checker"' in response.data
+    assert b'navbar-brand' in response.data
+    assert b'>Trail Checker</a>' in response.data
+    # Duplicate nav-item link removed; brand is the home entry point.
+    assert response.data.count(b'class="nav-link" href="/"') == 0
 
 
 @responses.activate

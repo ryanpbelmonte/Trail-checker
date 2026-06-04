@@ -43,7 +43,10 @@ def login_via_backdoor(page: Page, live_server, username: str = LIFECYCLE_USERNA
 def logout_via_ui(page: Page, live_server) -> None:
     """POST logout via navbar form (CSRF token included by the browser)."""
     page.goto(f"{live_server.url}/saved-trails")
-    page.get_by_role("button", name="Logout").click()
+    logout_button = page.locator("nav form[action$='/logout'] button[type='submit']")
+    expect(logout_button).to_be_visible()
+    with page.expect_navigation():
+        logout_button.click(force=True)
     expect(page).to_have_url(f"{live_server.url}/login")
 
 

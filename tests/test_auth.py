@@ -33,21 +33,13 @@ def client():
 
 
 def test_home_page_loads(client):
-    """Flask-rendered home page returns 200 and has the navbar."""
+    """Home page is the trail checker landing with search form."""
     response = client.get("/")
     assert response.status_code == 200
-    assert b"Skeleton" in response.data
-    # Navbar is present
-    assert b"My Site" in response.data
-    assert b"About" in response.data
-
-
-def test_site_home_shows_placeholder_when_empty(client):
-    """When S3_content/ has no index.html, /site/ shows the placeholder."""
-    response = client.get("/site/")
-    # Either 200 with the placeholder, or 200 with the actual index.html
-    # (depending on whether the developer has populated S3_content/).
-    assert response.status_code == 200
+    assert b"Check trail conditions before you go" in response.data
+    assert b'action="/trail-checker/results"' in response.data
+    assert b"My Site" not in response.data
+    assert b"About" not in response.data
 
 
 def test_login_page_renders(client):

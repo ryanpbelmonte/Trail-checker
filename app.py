@@ -3,18 +3,14 @@ Course 506 Week 6 — Trail Checker (DB-and-security slice implemented)
 
 Flask + Postgres + SQLModel + Flask-Login + Flask-WTF + Flask-Limiter.
 
-The home page serves the static site you sync from your S3 bucket into
-S3_content/. Login, register, logout, and about are Flask-rendered routes.
-Saved trail routes are protected by Flask-Login and enforce ownership at
-the database query level.
+Login, register, and logout are Flask-rendered routes. Saved trail routes
+are protected by Flask-Login and enforce ownership at the database query level.
 """
 
 import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
 from dotenv import load_dotenv
 
 # Load .env BEFORE any os.environ reads below. load_dotenv() is a no-op
@@ -27,7 +23,7 @@ from authlib.integrations.base_client.errors import MismatchingStateError, OAuth
 from authlib.integrations.flask_client import OAuth
 from flask import (
     Flask, render_template, request, redirect, url_for, session, flash, g,
-    send_from_directory, abort, jsonify,
+    abort, jsonify,
 )
 from flask_login import (
     LoginManager,
@@ -119,9 +115,6 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
-
-
-S3_CONTENT_DIR = Path(__file__).parent / "S3_content"
 
 
 login_manager = LoginManager()
@@ -554,23 +547,7 @@ def _login_user_after_oauth(user: User) -> None:
 
 @app.route("/")
 def home():
-    return render_template("home.html")
-
-
-@app.route("/site/")
-def site_home():
-    index_path = S3_CONTENT_DIR / "index.html"
-    if not index_path.exists():
-        return render_template("placeholder.html"), 200
-    return send_from_directory(S3_CONTENT_DIR, "index.html")
-
-
-@app.route("/site/<path:filename>")
-def serve_s3_content(filename):
-    file_path = S3_CONTENT_DIR / filename
-    if not file_path.exists() or not file_path.is_file():
-        abort(404)
-    return send_from_directory(S3_CONTENT_DIR, filename)
+    return render_template("trail_checker.html")
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -729,11 +706,6 @@ def test_login(username: str):
     return redirect(url_for("saved_trails"))
 
 
-@app.route("/about")
-def about():
-    return render_template("about.html")
-
-
 # ---------------------------------------------------------------------------
 # Routes — Trail Checker
 # ---------------------------------------------------------------------------
@@ -831,7 +803,7 @@ def _render_trail_checker_error(message: str, query_text: str = ""):
 
 @app.route("/trail-checker")
 def trail_checker():
-    return render_template("trail_checker.html")
+    return redirect(url_for("home"))
 
 
 @app.route("/trail-checker/results")

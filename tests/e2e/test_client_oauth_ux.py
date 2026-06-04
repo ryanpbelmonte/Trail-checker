@@ -31,6 +31,9 @@ def test_client_github_login_button_backdoor_session_and_logout(page: Page, live
     expect(page).to_have_url(f"{live_server.url}/saved-trails")
     expect(page.get_by_text("Logged in as LiamCase")).to_be_visible()
 
-    page.get_by_role("button", name="Logout").click()
+    logout_button = page.locator("nav form[action$='/logout'] button[type='submit']")
+    expect(logout_button).to_be_visible()
+    with page.expect_navigation():
+        logout_button.click(force=True)
     expect(page).to_have_url(f"{live_server.url}/login")
     expect(page.get_by_role("link", name="Sign in with GitHub")).to_be_visible()
