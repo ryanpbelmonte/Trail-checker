@@ -140,7 +140,7 @@
         {% endif %}
     {% else %}
     <div class="alert alert-light border mt-4 mb-0">
-        <a href="/login">Log in</a> to save this location.
+        <a href="{{ url_for('login_to_save_location', display_name=resolved_name, query_text=query_text, latitude=latitude, longitude=longitude, country=country or '', state=state or '') }}">Log in</a> to save this location.
     </div>
     {% endif %}
 </section>

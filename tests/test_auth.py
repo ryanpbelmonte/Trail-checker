@@ -103,6 +103,124 @@ def test_login_redirects_saved_trails_with_session(client):
         assert "_user_id" in sess
 
 
+def test_login_to_save_location_auto_saves_after_login(client):
+    """Search -> log in to save -> saved-trails with location already saved."""
+    client.post("/register", data={"username": "dana", "password": "password123"})
+    client.post("/logout")
+
+    prep = client.get(
+        "/login/save-location",
+        query_string={
+            "display_name": "Mount Rainier",
+            "query_text": "Mount Rainier",
+            "latitude": "46.8523",
+            "longitude": "-121.7603",
+            "country": "US",
+            "state": "Washington",
+        },
+        follow_redirects=False,
+    )
+    assert prep.status_code == 302
+    assert "/login" in prep.location
+
+    with client.session_transaction() as sess:
+        assert sess["pending_saved_trail"]["display_name"] == "Mount Rainier"
+
+    response = client.post(
+        "/login",
+        data={
+            "username": "dana",
+            "password": "password123",
+            "next": "/saved-trails",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Trail saved" in response.data
+    assert b"Mount Rainier" in response.data
+
+    with client.session_transaction() as sess:
+        assert "pending_saved_trail" not in sess
+
+
+def test_queued_save_redirects_saved_trails_even_if_next_is_results(client):
+    """Pending save wins over a stale next=results redirect target."""
+    client.post("/register", data={"username": "frank", "password": "password123"})
+    client.post("/logout")
+
+    client.get(
+        "/login/save-location",
+        query_string={
+            "display_name": "Yosemite",
+            "query_text": "Yosemite",
+            "latitude": "37.8651",
+            "longitude": "-119.5383",
+            "country": "US",
+            "state": "California",
+        },
+    )
+
+    response = client.post(
+        "/login",
+        data={
+            "username": "frank",
+            "password": "password123",
+            "next": "/trail-checker/results?q=Yosemite",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.location.endswith("/saved-trails")
+
+
+def test_register_after_login_to_save_also_persists_trail(client):
+    """New account from login-to-save flow still saves the queued location."""
+    prep = client.get(
+        "/login/save-location",
+        query_string={
+            "display_name": "Seattle",
+            "query_text": "Seattle",
+            "latitude": "47.6062",
+            "longitude": "-122.3321",
+            "country": "US",
+            "state": "Washington",
+        },
+        follow_redirects=False,
+    )
+    assert prep.status_code == 302
+
+    response = client.post(
+        "/register",
+        data={
+            "username": "newhiker",
+            "password": "password123",
+            "next": "/saved-trails",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Trail saved" in response.data
+    assert b"Seattle" in response.data
+
+
+def test_login_rejects_unsafe_external_next(client):
+    """Open redirects via next are ignored; default to saved-trails."""
+    client.post("/register", data={"username": "erin", "password": "password123"})
+    client.post("/logout")
+
+    response = client.post(
+        "/login",
+        data={
+            "username": "erin",
+            "password": "password123",
+            "next": "https://evil.example/phish",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.location.endswith("/saved-trails")
+
+
 def test_login_marks_session_permanent(client):
     """session.permanent=True must be set so PERMANENT_SESSION_LIFETIME applies."""
     client.post("/register", data={"username": "ed", "password": "password123"})

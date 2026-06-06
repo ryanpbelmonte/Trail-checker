@@ -380,6 +380,128 @@ def validate_text(value: str | None, min_len: int, max_len: int, field_name: str
     return cleaned
 
 
+def _safe_next_url(target: str | None) -> str | None:
+    """Allow only same-site relative paths for post-login redirects."""
+    if not target:
+        return None
+    cleaned = target.strip()
+    if not cleaned.startswith("/") or cleaned.startswith("//"):
+        return None
+    return cleaned
+
+
+def _post_login_redirect_url(*, default: str | None = None) -> str:
+    """Resolve redirect after login/register/OAuth; honors ?next= when safe."""
+    if default is None:
+        default = url_for("saved_trails")
+    next_from_form = _safe_next_url(request.form.get("next"))
+    next_from_args = _safe_next_url(request.args.get("next"))
+    next_from_session = _safe_next_url(session.pop("post_login_next", None))
+    return next_from_form or next_from_args or next_from_session or default
+
+
+def _save_trail_for_user(
+    db: Session,
+    user_id: int,
+    *,
+    display_name: str,
+    query_text: str,
+    latitude: float,
+    longitude: float,
+    country: str | None,
+    state: str | None,
+    notes: str | None = None,
+) -> str:
+    """Persist a saved trail. Returns 'created' or 'duplicate'."""
+    existing = db.exec(
+        select(SavedTrail).where(
+            SavedTrail.user_id == user_id,
+            SavedTrail.latitude == latitude,
+            SavedTrail.longitude == longitude,
+        )
+    ).first()
+
+    if existing is not None:
+        _claim_anonymous_trail_checks(db, user_id, latitude, longitude)
+        return "duplicate"
+
+    trail = SavedTrail(
+        user_id=user_id,
+        display_name=display_name,
+        query_text=query_text,
+        latitude=latitude,
+        longitude=longitude,
+        country=country,
+        state=state,
+        notes=notes,
+    )
+    db.add(trail)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        audit(
+            "saved_trail.create.duplicate",
+            user_id=user_id,
+            latitude=latitude,
+            longitude=longitude,
+        )
+        _claim_anonymous_trail_checks(db, user_id, latitude, longitude)
+        return "duplicate"
+
+    db.refresh(trail)
+    audit(
+        "saved_trail.create",
+        user_id=user_id,
+        trail_id=trail.id,
+    )
+    _claim_anonymous_trail_checks(db, user_id, latitude, longitude)
+    return "created"
+
+
+def _redirect_after_auth(user_id: int, *, default: str | None = None):
+    """Complete login/register/OAuth: auto-save queued trail, then redirect."""
+    queued_save = "pending_saved_trail" in session
+    _consume_pending_saved_trail(user_id)
+    if queued_save:
+        return redirect(url_for("saved_trails"))
+    return redirect(_post_login_redirect_url(default=default))
+
+
+def _consume_pending_saved_trail(user_id: int) -> None:
+    """After login/register/OAuth, save a trail the user queued from results."""
+    pending = session.pop("pending_saved_trail", None)
+    if not pending:
+        return
+
+    try:
+        display_name = validate_text(pending.get("display_name"), 2, 100, "display_name")
+        query_text = validate_text(pending.get("query_text"), 2, 100, "query_text")
+        latitude = validate_float(pending.get("latitude"), -90, 90, "latitude")
+        longitude = validate_float(pending.get("longitude"), -180, 180, "longitude")
+        country = validate_optional_text(pending.get("country"), 10, "country")
+        state = validate_optional_text(pending.get("state"), 100, "state")
+    except ValueError:
+        return
+
+    db = get_db_session()
+    outcome = _save_trail_for_user(
+        db,
+        user_id,
+        display_name=display_name,
+        query_text=query_text,
+        latitude=latitude,
+        longitude=longitude,
+        country=country,
+        state=state,
+    )
+    if outcome == "created":
+        flash("Trail saved.")
+    else:
+        flash("That trail is already saved.")
+
+
 def validate_optional_text(value: str | None, max_len: int, field_name: str) -> str | None:
     cleaned = (value or "").strip()
     if not cleaned:
@@ -552,15 +674,17 @@ def home():
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    next_url = _safe_next_url(request.args.get("next") or request.form.get("next"))
+
     if request.method == "GET":
-        return render_template("register.html")
+        return render_template("register.html", next_url=next_url)
 
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
 
     if not username or not password:
         flash("Username and password are required.")
-        return redirect(url_for("register"))
+        return redirect(url_for("register", next=next_url) if next_url else url_for("register"))
 
     try:
         validate_password_policy(password)
@@ -593,14 +717,16 @@ def register():
         username=username,
         ip=request.remote_addr,
     )
-    return redirect(url_for("home"))
+    return _redirect_after_auth(user.id, default=url_for("home"))
 
 
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute", methods=["POST"])
 def login():
+    next_url = _safe_next_url(request.args.get("next") or request.form.get("next"))
+
     if request.method == "GET":
-        return render_template("login.html")
+        return render_template("login.html", next_url=next_url)
 
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
@@ -616,12 +742,12 @@ def login():
         check_password_hash(_DUMMY_PASSWORD_HASH, password)
         audit("user.login.failure", username=username, ip=request.remote_addr)
         flash("Invalid username or password.")
-        return redirect(url_for("login"))
+        return redirect(url_for("login", next=next_url) if next_url else url_for("login"))
 
     if not check_password_hash(user.password_hash, password):
         audit("user.login.failure", username=username, ip=request.remote_addr)
         flash("Invalid username or password.")
-        return redirect(url_for("login"))
+        return redirect(url_for("login", next=next_url) if next_url else url_for("login"))
 
     login_user(user, remember=remember)
     session.permanent = True
@@ -631,7 +757,34 @@ def login():
         remember=remember,
         ip=request.remote_addr,
     )
-    return redirect(url_for("saved_trails"))
+    return _redirect_after_auth(user.id)
+
+
+@app.route("/login/save-location")
+def login_to_save_location():
+    """Stash searched location in session, then send user to login to save it."""
+    try:
+        display_name = validate_text(request.args.get("display_name"), 2, 100, "display_name")
+        query_text = validate_text(request.args.get("query_text"), 2, 100, "query_text")
+        latitude = validate_float(request.args.get("latitude"), -90, 90, "latitude")
+        longitude = validate_float(request.args.get("longitude"), -180, 180, "longitude")
+        country = validate_optional_text(request.args.get("country"), 10, "country")
+        state = validate_optional_text(request.args.get("state"), 100, "state")
+    except ValueError:
+        flash("Could not save that location. Search again and try once more.")
+        return redirect(url_for("home"))
+
+    session.permanent = True
+    session["pending_saved_trail"] = {
+        "display_name": display_name,
+        "query_text": query_text,
+        "latitude": latitude,
+        "longitude": longitude,
+        "country": country,
+        "state": state,
+    }
+    session.modified = True
+    return redirect(url_for("login", next="/saved-trails"))
 
 
 @app.route("/logout", methods=["POST"])
@@ -648,6 +801,9 @@ def login_github():
     if not _oauth_github_configured():
         flash("GitHub sign-in is not configured.")
         return redirect(url_for("login"))
+    next_url = _safe_next_url(request.args.get("next"))
+    if next_url:
+        session["post_login_next"] = next_url
     redirect_uri = url_for("auth_github_callback", _external=True)
     return oauth.github.authorize_redirect(redirect_uri)
 
@@ -687,7 +843,7 @@ def auth_github_callback():
         provider="github",
         ip=request.remote_addr,
     )
-    return redirect(url_for("saved_trails"))
+    return _redirect_after_auth(user.id)
 
 
 @app.route("/test/login/<username>")
@@ -779,6 +935,24 @@ def _format_saved_location(trail: SavedTrail) -> str:
     if parts:
         return ", ".join(parts)
     return f"{trail.latitude:.2f}, {trail.longitude:.2f}"
+
+
+def _claim_anonymous_trail_checks(
+    db: Session, user_id: int, latitude: float, longitude: float
+) -> None:
+    """Attach anonymous search snapshots to the user who saved this location."""
+    anonymous = db.exec(
+        select(TrailCheck).where(
+            TrailCheck.user_id == None,  # noqa: E711 — SQL NULL match
+            TrailCheck.latitude == latitude,
+            TrailCheck.longitude == longitude,
+        )
+    ).all()
+    if not anonymous:
+        return
+    for row in anonymous:
+        row.user_id = user_id
+    db.commit()
 
 
 def _latest_trail_check_for_saved(
@@ -1008,20 +1182,9 @@ def create_saved_trail():
         return redirect(url_for("saved_trails"))
 
     db = get_db_session()
-    existing = db.exec(
-        select(SavedTrail).where(
-            SavedTrail.user_id == current_user.id,
-            SavedTrail.latitude == latitude,
-            SavedTrail.longitude == longitude,
-        )
-    ).first()
-
-    if existing is not None:
-        flash("That trail is already saved.")
-        return redirect(url_for("saved_trails"))
-
-    trail = SavedTrail(
-        user_id=current_user.id,
+    outcome = _save_trail_for_user(
+        db,
+        current_user.id,
         display_name=display_name,
         query_text=query_text,
         latitude=latitude,
@@ -1030,28 +1193,10 @@ def create_saved_trail():
         state=state,
         notes=notes,
     )
-    db.add(trail)
-
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        audit(
-            "saved_trail.create.duplicate",
-            user_id=current_user.id,
-            latitude=latitude,
-            longitude=longitude,
-        )
+    if outcome == "created":
+        flash("Trail saved.")
+    else:
         flash("That trail is already saved.")
-        return redirect(url_for("saved_trails"))
-
-    db.refresh(trail)
-    audit(
-        "saved_trail.create",
-        user_id=current_user.id,
-        trail_id=trail.id,
-    )
-    flash("Trail saved.")
     return redirect(url_for("saved_trails"))
 
 

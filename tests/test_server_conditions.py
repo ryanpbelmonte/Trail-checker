@@ -139,6 +139,43 @@ def test_results_page_persists_trail_check_for_anonymous_search(client):
 
 
 @responses.activate
+def test_login_to_save_shows_conditions_from_anonymous_search(client):
+    """Log-in-to-save adopts the anonymous trail_check so saved-trails has data."""
+    add_openweather_responses()
+    client.post("/register", data={"username": "hiker", "password": "password123"})
+    client.post("/logout")
+
+    response = client.get("/trail-checker/results?q=Mount%20Rainier")
+    assert response.status_code == 200
+
+    client.get(
+        "/login/save-location",
+        query_string={
+            "display_name": "Mount Rainier",
+            "query_text": "Mount Rainier",
+            "latitude": "46.8523",
+            "longitude": "-121.7603",
+            "country": "US",
+            "state": "Washington",
+        },
+    )
+    saved_page = client.post(
+        "/login",
+        data={"username": "hiker", "password": "password123", "next": "/saved-trails"},
+        follow_redirects=True,
+    )
+
+    assert b"Trail saved" in saved_page.data
+    assert b"overcast clouds" in saved_page.data
+    assert b'data-testid="saved-trail-recommendation"' in saved_page.data
+
+    with Session(engine) as db:
+        check = db.exec(select(TrailCheck)).first()
+        assert check is not None
+        assert check.user_id is not None
+
+
+@responses.activate
 def test_results_page_marks_existing_saved_trail(client):
     """Logged-in users see already-saved state for matching coordinates."""
     client.post("/register", data={"username": "hiker", "password": "password123"})
