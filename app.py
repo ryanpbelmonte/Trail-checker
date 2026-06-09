@@ -923,12 +923,11 @@ RECOMMENDATION_SORT_RANK = {
 
 
 def _saved_trail_sort_key(entry: dict) -> tuple:
-    """Sort saved-trails list: best recommendation first, then newest save."""
+    """Sort saved-trails list: best recommendation first, then name A-Z."""
     latest = entry["latest"]
     rank = RECOMMENDATION_SORT_RANK.get(latest.recommendation, 0) if latest else 0
-    created = entry["trail"].created_at
-    created_ts = created.timestamp() if created.tzinfo else created.replace(tzinfo=timezone.utc).timestamp()
-    return (rank, created_ts)
+    name_key = entry["trail"].display_name.casefold()
+    return (-rank, name_key)
 
 
 def _format_location_line(
@@ -1166,7 +1165,7 @@ def saved_trails():
         }
         for trail in trails
     ]
-    trail_entries.sort(key=_saved_trail_sort_key, reverse=True)
+    trail_entries.sort(key=_saved_trail_sort_key)
 
     prior_input = session.pop("saved_trail_form", None)
     return render_template(

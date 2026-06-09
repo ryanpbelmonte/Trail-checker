@@ -22,7 +22,7 @@
         {% set trail = entry.trail %}
         {% set latest = entry.latest %}
         <div class="col-12">
-            <div class="card saved-trail-card shadow-sm h-100" data-saved-trail-id="{{ trail.id }}">
+            <div class="card saved-trail-card shadow-sm h-100 tc-surface-card" data-saved-trail-id="{{ trail.id }}">
                 <div class="card-body p-4">
                     <div class="alert alert-warning d-none mb-3" data-recheck-error role="alert"></div>
 
@@ -137,7 +137,7 @@
         {% endfor %}
     </div>
     {% else %}
-    <div class="card border-0 shadow-sm" data-testid="saved-trails-empty">
+    <div class="card border-0 shadow-sm tc-surface-card" data-testid="saved-trails-empty">
         <div class="card-body p-4 p-md-5 text-center">
             <h2 class="h4 fw-bold">No saved trails yet</h2>
             <p class="text-muted mb-4">

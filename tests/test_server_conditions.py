@@ -304,3 +304,57 @@ def test_saved_trails_sorted_by_recommendation_best_first(client):
     assert body.index("Good Ridge") < body.index("Caution Cove")
     assert body.index("Caution Cove") < body.index("Poor Peak")
     assert body.index("Poor Peak") < body.index("No Check Yet")
+
+
+def test_saved_trails_sorted_alphabetically_within_recommendation(client):
+    """Trails with the same recommendation appear in A-Z order by display name."""
+    from sqlmodel import Session, select
+
+    from app import SavedTrail, TrailCheck, User
+
+    client.post("/register", data={"username": "alphasort", "password": "password123"})
+
+    fixtures = [
+        ("Zebra Falls", "good", 47.1, -121.1),
+        ("Alpha Peak", "good", 47.2, -121.2),
+        ("Mesa Point", "good", 47.3, -121.3),
+        ("Yosemite View", "caution", 46.1, -122.1),
+        ("Bear Lake", "caution", 46.2, -122.2),
+    ]
+
+    with Session(engine) as db:
+        user = db.exec(select(User).where(User.username == "alphasort")).first()
+        assert user is not None
+        for name, recommendation, lat, lon in fixtures:
+            trail = SavedTrail(
+                user_id=user.id,
+                display_name=name,
+                query_text=name,
+                latitude=lat,
+                longitude=lon,
+            )
+            db.add(trail)
+            db.commit()
+            db.refresh(trail)
+            db.add(
+                TrailCheck(
+                    user_id=user.id,
+                    query_text=name,
+                    resolved_name=name,
+                    latitude=lat,
+                    longitude=lon,
+                    weather_main="Clear",
+                    weather_description="clear sky",
+                    temp_f=60.0,
+                    recommendation=recommendation,
+                )
+            )
+        db.commit()
+
+    response = client.get("/saved-trails")
+    assert response.status_code == 200
+    body = response.data.decode()
+    assert body.index("Alpha Peak") < body.index("Mesa Point")
+    assert body.index("Mesa Point") < body.index("Zebra Falls")
+    assert body.index("Zebra Falls") < body.index("Bear Lake")
+    assert body.index("Bear Lake") < body.index("Yosemite View")

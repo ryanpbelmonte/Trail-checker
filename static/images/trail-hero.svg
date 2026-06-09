@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240" role="img" aria-label="Mountain trail landscape">
+  <defs>
+    <linearGradient id="hero-sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#d8f3dc"/>
+      <stop offset="100%" stop-color="#95d5b2"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="320" height="240" rx="16" fill="url(#hero-sky)"/>
+
+  <!-- Third set (lightest, farthest back) — drawn first -->
+  <path fill="#74c69d" d="M0 175 L55 92 L115 112 L175 82 L235 100 L295 88 L320 95 L320 240 L0 240 Z"/>
+
+  <!-- Second set (medium) -->
+  <path fill="#40916c" d="M0 205 L65 148 L125 162 L178 138 L232 152 L290 140 L320 150 L320 240 L0 240 Z"/>
+
+  <!-- First set (dark green, nearest) — drawn last -->
+  <path fill="#2d6a4f" d="M0 225 L48 186 L108 192 L162 176 L218 184 L278 170 L320 188 L320 240 L0 240 Z"/>
+
+  <circle cx="88" cy="44" r="20" fill="#ffe8a3" fill-opacity="0.9"/>
+
+  <!-- Trail: up first (dark), then second (medium), then third (light) right summit -->
+  <path fill="none" stroke="#d8f3dc" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"
+        d="M 22 235
+           L 48 186
+           L 88 190
+           L 128 186
+           L 178 138
+           L 210 148
+           L 248 118
+           L 272 102
+           L 295 88"/>
+
+  <!-- Hiker on the rightmost peak of the lightest mountains -->
+  <g fill="#1b4332" stroke="#1b4332" stroke-width="2" stroke-linecap="round">
+    <circle cx="295" cy="75" r="5"/>
+    <line x1="295" y1="80" x2="295" y2="88"/>
+    <line x1="295" y1="83" x2="290" y2="88"/>
+    <line x1="295" y1="83" x2="300" y2="88"/>
+  </g>
+</svg>

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMax slice" role="img" aria-hidden="true">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#d8f3dc"/>
+      <stop offset="55%" stop-color="#b7e4c7"/>
+      <stop offset="100%" stop-color="#95d5b2"/>
+    </linearGradient>
+    <linearGradient id="mist" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8faf9" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#f8faf9" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1440" height="900" fill="url(#sky)"/>
+
+  <!-- distant ridge -->
+  <path fill="#74c69d" fill-opacity="0.55" d="M0 520 L180 430 L360 470 L520 390 L700 450 L900 360 L1080 420 L1260 350 L1440 400 L1440 900 L0 900 Z"/>
+
+  <!-- mid mountains -->
+  <path fill="#40916c" fill-opacity="0.75" d="M0 600 L240 500 L420 560 L620 470 L840 540 L1040 480 L1240 550 L1440 510 L1440 900 L0 900 Z"/>
+
+  <!-- foreground hills -->
+  <path fill="#2d6a4f" d="M0 680 L200 620 L380 660 L560 590 L760 640 L980 600 L1180 650 L1440 610 L1440 900 L0 900 Z"/>
+  <path fill="#1b4332" d="M0 760 L160 710 L340 740 L520 690 L720 730 L920 700 L1120 735 L1440 710 L1440 900 L0 900 Z"/>
+
+  <!-- trail path -->
+  <path fill="none" stroke="#d8f3dc" stroke-width="10" stroke-linecap="round" stroke-opacity="0.65"
+        d="M720 900 C700 820 680 780 640 740 C600 700 560 680 520 660"/>
+
+  <!-- trees -->
+  <g fill="#1b4332" fill-opacity="0.85">
+    <path d="M120 700 L140 640 L160 700 Z"/>
+    <path d="M180 720 L200 655 L220 720 Z"/>
+    <path d="M1280 690 L1300 630 L1320 690 Z"/>
+    <path d="M1340 710 L1360 650 L1380 710 Z"/>
+  </g>
+
+  <!-- soft mist at bottom for text contrast -->
+  <rect width="1440" height="900" fill="url(#mist)"/>
+</svg>

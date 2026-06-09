@@ -1,4 +1,4 @@
-/* Trail Checker — Level 1 site visuals */
+/* Trail Checker — Level 2 site visuals (background imagery) */
 
 :root {
     --tc-primary: #2d6a4f;
@@ -20,6 +20,18 @@ body {
     display: flex;
     flex-direction: column;
     background-color: var(--tc-surface);
+    background-image:
+        linear-gradient(
+            to bottom,
+            rgba(248, 250, 249, 0.9) 0%,
+            rgba(248, 250, 249, 0.82) 45%,
+            rgba(248, 250, 249, 0.92) 100%
+        ),
+        url("../images/trail-background.svg");
+    background-size: cover;
+    background-position: center bottom;
+    background-repeat: no-repeat;
+    background-attachment: scroll;
 }
 
 main {
@@ -68,8 +80,26 @@ main {
 
 /* Cards and auth */
 
+.tc-surface-card {
+    background-color: rgba(255, 255, 255, 0.97);
+    backdrop-filter: blur(4px);
+}
+
 .tc-hero-card {
     border-top: 4px solid var(--tc-accent);
+}
+
+.tc-hero-illustration {
+    max-width: 100%;
+    height: auto;
+    border-radius: 1rem;
+    box-shadow: 0 8px 24px rgba(27, 67, 50, 0.12);
+}
+
+.tc-hero-illustration-sm {
+    max-width: 240px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .tc-auth-card {
@@ -90,11 +120,6 @@ main {
 
 .tc-location-line {
     font-size: 1.05rem;
-    color: var(--tc-text-muted);
-}
-
-.tc-coordinates {
-    font-size: 0.8125rem;
     color: var(--tc-text-muted);
 }
 

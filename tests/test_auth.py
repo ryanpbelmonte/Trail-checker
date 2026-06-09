@@ -36,7 +36,7 @@ def test_home_page_loads(client):
     """Home page is the trail checker landing with search form."""
     response = client.get("/")
     assert response.status_code == 200
-    assert b"Check trail conditions before you go" in response.data
+    assert b'id="trail-search"' in response.data
     assert b'action="/trail-checker/results"' in response.data
     assert b"My Site" not in response.data
     assert b"About" not in response.data

@@ -25,3 +25,16 @@ document.querySelectorAll("form[data-disable-on-submit]").forEach(form => {
     });
 });
 
+// Bootstrap's bundle is blocked by our CSP (script-src 'self'), so dismiss
+// flash alerts locally instead of relying on data-bs-dismiss.
+document.addEventListener("click", (event) => {
+    const closeButton = event.target.closest('[data-bs-dismiss="alert"]');
+    if (!closeButton) {
+        return;
+    }
+    const alert = closeButton.closest(".alert");
+    if (alert) {
+        alert.remove();
+    }
+});
+

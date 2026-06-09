@@ -6,12 +6,7 @@
         <div>
             <span class="badge text-bg-success mb-2">Live Conditions</span>
             <h1 class="display-6 fw-bold mb-1">Conditions for {{ resolved_name }}</h1>
-            <p class="tc-location-line mb-1">{{ location_line }}</p>
-            <p class="tc-coordinates mb-0">
-                Searched for &ldquo;{{ query_text }}&rdquo;
-                <span class="d-none d-md-inline">&middot;</span>
-                <span class="d-block d-md-inline">{{ latitude }}, {{ longitude }}</span>
-            </p>
+            <p class="tc-location-line mb-0">{{ location_line }}</p>
         </div>
 
         <a href="{{ url_for('home') }}" class="btn btn-outline-primary">
@@ -19,7 +14,7 @@
         </a>
     </div>
 
-    <div class="card border-0 shadow-sm mb-4">
+    <div class="card border-0 shadow-sm mb-4 tc-surface-card">
         <div class="card-body p-4">
             <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
                 <div>
@@ -46,7 +41,7 @@
 
     <div class="row g-4">
         <div class="col-lg-6">
-            <div class="card h-100 shadow-sm" data-testid="weather-card">
+            <div class="card h-100 shadow-sm tc-surface-card" data-testid="weather-card">
                 <div class="card-header bg-white">
                     <h2 class="h5 mb-0">Weather</h2>
                 </div>
@@ -86,7 +81,7 @@
         </div>
 
         <div class="col-lg-6">
-            <div class="card h-100 shadow-sm" data-testid="air-quality-card">
+            <div class="card h-100 shadow-sm tc-surface-card" data-testid="air-quality-card">
                 <div class="card-header bg-white">
                     <h2 class="h5 mb-0">Air quality</h2>
                 </div>
@@ -119,7 +114,7 @@
 
     {% if user %}
         {% if not is_saved %}
-        <div class="card border-0 shadow-sm mt-4">
+        <div class="card border-0 shadow-sm mt-4 tc-surface-card">
             <div class="card-body">
                 <form method="POST" action="/saved-trails">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
