@@ -369,7 +369,7 @@ def handle_csrf_error(error):
     """
     if not current_user.is_authenticated:
         return redirect(url_for("login"))
-    flash("Your session expired. Please try again.")
+    flash("Your session expired. Please try again.", "warning")
     return redirect(request.referrer or url_for("home"))
 
 
@@ -497,9 +497,9 @@ def _consume_pending_saved_trail(user_id: int) -> None:
         state=state,
     )
     if outcome == "created":
-        flash("Trail saved.")
+        flash("Trail saved.", "success")
     else:
-        flash("That trail is already saved.")
+        flash("That trail is already saved.", "info")
 
 
 def validate_optional_text(value: str | None, max_len: int, field_name: str) -> str | None:
@@ -683,19 +683,19 @@ def register():
     password = request.form.get("password", "")
 
     if not username or not password:
-        flash("Username and password are required.")
+        flash("Username and password are required.", "danger")
         return redirect(url_for("register", next=next_url) if next_url else url_for("register"))
 
     try:
         validate_password_policy(password)
     except ValueError as error:
-        flash(str(error))
+        flash(str(error), "danger")
         return redirect(url_for("register"))
 
     db = get_db_session()
     existing = db.exec(select(User).where(User.username == username)).first()
     if existing is not None:
-        flash("That username is already taken.")
+        flash("That username is already taken.", "danger")
         return redirect(url_for("register"))
 
     user = User(
@@ -741,12 +741,12 @@ def login():
     if user is None or user.password_hash is None:
         check_password_hash(_DUMMY_PASSWORD_HASH, password)
         audit("user.login.failure", username=username, ip=request.remote_addr)
-        flash("Invalid username or password.")
+        flash("Invalid username or password.", "danger")
         return redirect(url_for("login", next=next_url) if next_url else url_for("login"))
 
     if not check_password_hash(user.password_hash, password):
         audit("user.login.failure", username=username, ip=request.remote_addr)
-        flash("Invalid username or password.")
+        flash("Invalid username or password.", "danger")
         return redirect(url_for("login", next=next_url) if next_url else url_for("login"))
 
     login_user(user, remember=remember)
@@ -771,7 +771,7 @@ def login_to_save_location():
         country = validate_optional_text(request.args.get("country"), 10, "country")
         state = validate_optional_text(request.args.get("state"), 100, "state")
     except ValueError:
-        flash("Could not save that location. Search again and try once more.")
+        flash("Could not save that location. Search again and try once more.", "warning")
         return redirect(url_for("home"))
 
     session.permanent = True
@@ -799,7 +799,7 @@ def logout():
 @app.route("/login/github")
 def login_github():
     if not _oauth_github_configured():
-        flash("GitHub sign-in is not configured.")
+        flash("GitHub sign-in is not configured.", "danger")
         return redirect(url_for("login"))
     next_url = _safe_next_url(request.args.get("next"))
     if next_url:
@@ -812,28 +812,28 @@ def login_github():
 @limiter.limit("10 per minute")
 def auth_github_callback():
     if not _oauth_github_configured():
-        flash("GitHub sign-in is not configured.")
+        flash("GitHub sign-in is not configured.", "danger")
         return redirect(url_for("login"))
 
     try:
         token = oauth.github.authorize_access_token()
     except MismatchingStateError:
-        flash("Sign-in could not be completed. Please try again.")
+        flash("Sign-in could not be completed. Please try again.", "danger")
         return redirect(url_for("login"))
     except OAuthError:
-        flash("Sign-in could not be completed. Please try again.")
+        flash("Sign-in could not be completed. Please try again.", "danger")
         return redirect(url_for("login"))
 
     resp = oauth.github.get("user", token=token)
     if resp.status_code != 200:
-        flash("Sign-in could not be completed. Please try again.")
+        flash("Sign-in could not be completed. Please try again.", "danger")
         return redirect(url_for("login"))
 
     github_user = resp.json()
     db = get_db_session()
     user = find_or_create_user_from_github(db, github_user)
     if user is None:
-        flash("Sign-in could not be completed. Please try again.")
+        flash("Sign-in could not be completed. Please try again.", "danger")
         return redirect(url_for("login"))
 
     _login_user_after_oauth(user)
@@ -898,6 +898,12 @@ def _results_context_from_data(data: dict, is_saved: bool = False) -> dict:
         "recommendation": data.get("recommendation", "unknown"),
         "country": data.get("country"),
         "state": data.get("state"),
+        "location_line": _format_location_line(
+            state=data.get("state"),
+            country=data.get("country"),
+            latitude=data["latitude"],
+            longitude=data["longitude"],
+        ),
         "is_saved": is_saved,
     }
 
@@ -925,16 +931,31 @@ def _saved_trail_sort_key(entry: dict) -> tuple:
     return (rank, created_ts)
 
 
-def _format_saved_location(trail: SavedTrail) -> str:
+def _format_location_line(
+    *,
+    state: str | None,
+    country: str | None,
+    latitude: float,
+    longitude: float,
+) -> str:
     """Human-readable place line from geocoding fields or coordinates."""
     parts = []
-    if trail.state:
-        parts.append(trail.state)
-    if trail.country:
-        parts.append(trail.country)
+    if state:
+        parts.append(state)
+    if country:
+        parts.append(country)
     if parts:
         return ", ".join(parts)
-    return f"{trail.latitude:.2f}, {trail.longitude:.2f}"
+    return f"{latitude:.2f}, {longitude:.2f}"
+
+
+def _format_saved_location(trail: SavedTrail) -> str:
+    return _format_location_line(
+        state=trail.state,
+        country=trail.country,
+        latitude=trail.latitude,
+        longitude=trail.longitude,
+    )
 
 
 def _claim_anonymous_trail_checks(
@@ -1054,8 +1075,8 @@ def _get_owned_saved_trail(db: Session, trail_id: int, user_id: int) -> SavedTra
     ).first()
 
 
-def _render_trail_checker_error(message: str, query_text: str = ""):
-    flash(message)
+def _render_trail_checker_error(message: str, query_text: str = "", category: str = "warning"):
+    flash(message, category)
     return render_template("trail_checker.html", query_text=query_text)
 
 
@@ -1084,11 +1105,13 @@ def trail_checker_results():
         return _render_trail_checker_error(
             "Weather data was malformed. Try again later.",
             query_text,
+            category="danger",
         )
     except ExternalAPIUnavailableError:
         return _render_trail_checker_error(
             "External weather service is unavailable. Try again later.",
             query_text,
+            category="danger",
         )
 
     db = get_db_session()
@@ -1169,7 +1192,7 @@ def create_saved_trail():
         state = validate_optional_text(form.get("state"), 100, "state")
         notes = validate_optional_text(form.get("notes"), 500, "notes")
     except ValueError as error:
-        flash(str(error))
+        flash(str(error), "danger")
         session["saved_trail_form"] = {
             "display_name": form.get("display_name", ""),
             "query_text": form.get("query_text", ""),
@@ -1194,9 +1217,9 @@ def create_saved_trail():
         notes=notes,
     )
     if outcome == "created":
-        flash("Trail saved.")
+        flash("Trail saved.", "success")
     else:
-        flash("That trail is already saved.")
+        flash("That trail is already saved.", "info")
     return redirect(url_for("saved_trails"))
 
 
@@ -1230,7 +1253,7 @@ def delete_saved_trail(trail_id: int):
         user_id=current_user.id,
         trail_id=trail_id,
     )
-    flash("Saved trail deleted.")
+    flash("Saved trail deleted.", "success")
     return redirect(url_for("saved_trails"))
 
 
@@ -1297,10 +1320,10 @@ def check_saved_trail(trail_id: int):
     try:
         trail_check = _recheck_saved_trail(db, trail, current_user.id)
     except ExternalAPIError:
-        flash("Weather data was malformed. Try again later.")
+        flash("Weather data was malformed. Try again later.", "danger")
         return redirect(url_for("saved_trails"))
     except ExternalAPIUnavailableError:
-        flash("External weather service is unavailable. Try again later.")
+        flash("External weather service is unavailable. Try again later.", "danger")
         return redirect(url_for("saved_trails"))
 
     data = {

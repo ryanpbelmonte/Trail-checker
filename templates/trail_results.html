@@ -6,8 +6,11 @@
         <div>
             <span class="badge text-bg-success mb-2">Live Conditions</span>
             <h1 class="display-6 fw-bold mb-1">Conditions for {{ resolved_name }}</h1>
-            <p class="text-muted mb-0">
-                Search: {{ query_text }} - Coordinates: {{ latitude }}, {{ longitude }}
+            <p class="tc-location-line mb-1">{{ location_line }}</p>
+            <p class="tc-coordinates mb-0">
+                Searched for &ldquo;{{ query_text }}&rdquo;
+                <span class="d-none d-md-inline">&middot;</span>
+                <span class="d-block d-md-inline">{{ latitude }}, {{ longitude }}</span>
             </p>
         </div>
 

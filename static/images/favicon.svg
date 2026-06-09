@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Trail Checker">
+  <rect width="32" height="32" rx="6" fill="#1b4332"/>
+  <path fill="#95d5b2" d="M6 26 L16 6 L26 26 Z"/>
+  <path fill="#2d6a4f" d="M9 26 L16 12 L23 26 Z"/>
+  <circle cx="16" cy="10" r="2.5" fill="#d8f3dc"/>
+</svg>

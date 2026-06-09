@@ -1,17 +1,131 @@
-/* Course 506 Week 5 Skeleton — minimal custom styles.
-   Bootstrap handles the bulk of layout and components. Add team-specific
-   styling here as your project grows. */
+/* Trail Checker — Level 1 site visuals */
+
+:root {
+    --tc-primary: #2d6a4f;
+    --tc-primary-dark: #1b4332;
+    --tc-primary-light: #40916c;
+    --tc-accent: #52b788;
+    --tc-surface: #f8faf9;
+    --tc-text-muted: #5c6b63;
+    --tc-navbar-height: 3.5rem;
+    --bs-primary: var(--tc-primary);
+    --bs-primary-rgb: 45, 106, 79;
+    --bs-link-color: var(--tc-primary);
+    --bs-link-hover-color: var(--tc-primary-dark);
+    --bs-body-font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
 
 body {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    background-color: var(--tc-surface);
 }
 
 main {
     flex: 1;
 }
 
+/* Navbar */
+
+.tc-navbar {
+    background: linear-gradient(135deg, var(--tc-primary-dark) 0%, var(--tc-primary) 100%);
+    box-shadow: 0 2px 8px rgba(27, 67, 50, 0.2);
+}
+
+.tc-navbar .navbar-brand {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.tc-navbar .nav-link {
+    color: rgba(255, 255, 255, 0.85);
+    font-weight: 500;
+    border-radius: 0.375rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    margin-left: 0.125rem;
+}
+
+.tc-navbar .nav-link:hover,
+.tc-navbar .nav-link:focus {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.tc-navbar .nav-link.active {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+.tc-navbar .btn-link.nav-link {
+    text-decoration: none;
+}
+
+.tc-navbar .btn-link.nav-link:hover {
+    text-decoration: none;
+}
+
+/* Cards and auth */
+
+.tc-hero-card {
+    border-top: 4px solid var(--tc-accent);
+}
+
+.tc-auth-card {
+    border-top: 4px solid var(--tc-primary);
+}
+
+.tc-auth-card .card-body {
+    padding: 1.75rem;
+}
+
+/* Saved trails */
+
 .saved-trail-card {
-    border-left: 4px solid var(--bs-success);
+    border-left: 4px solid var(--tc-accent);
+}
+
+/* Results location */
+
+.tc-location-line {
+    font-size: 1.05rem;
+    color: var(--tc-text-muted);
+}
+
+.tc-coordinates {
+    font-size: 0.8125rem;
+    color: var(--tc-text-muted);
+}
+
+/* Footer */
+
+.tc-footer {
+    border-top: 1px solid rgba(27, 67, 50, 0.08);
+    padding-top: 1.25rem;
+    color: var(--tc-text-muted);
+}
+
+/* Buttons */
+
+.btn-primary {
+    --bs-btn-bg: var(--tc-primary);
+    --bs-btn-border-color: var(--tc-primary);
+    --bs-btn-hover-bg: var(--tc-primary-dark);
+    --bs-btn-hover-border-color: var(--tc-primary-dark);
+    --bs-btn-active-bg: var(--tc-primary-dark);
+    --bs-btn-active-border-color: var(--tc-primary-dark);
+}
+
+.btn-outline-primary {
+    --bs-btn-color: var(--tc-primary);
+    --bs-btn-border-color: var(--tc-primary);
+    --bs-btn-hover-bg: var(--tc-primary);
+    --bs-btn-hover-border-color: var(--tc-primary);
+    --bs-btn-active-bg: var(--tc-primary-dark);
+    --bs-btn-active-border-color: var(--tc-primary-dark);
+}
+
+.badge.text-bg-success {
+    background-color: var(--tc-primary) !important;
 }
