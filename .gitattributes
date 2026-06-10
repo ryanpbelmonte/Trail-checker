@@ -1,0 +1,3 @@
+# Normalize line endings across platforms: treat files as text and
+# check out with LF so the repo stays consistent (avoids CRLF/^M churn).
+* text=auto eol=lf

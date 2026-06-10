@@ -34,7 +34,9 @@ instance/
 # Week 8 — self-signed TLS material (§7); regenerate per environment
 nginx/certs/*.pem
 
-# Local-only: assignment/study guides and duplicate contract mirror (not for team remote)
-docs/
+# Local-only: course assignment copies, personal notes, and duplicate contract mirror (not for team remote)
+_assignment_instructions/
+_personal_docs/
+_personal_recap/
 week8_study_guide-final.md
 contracts/CONTRACTS.md

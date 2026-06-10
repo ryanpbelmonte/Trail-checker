@@ -812,7 +812,7 @@ At least one E2E step must hit the real OpenWeather service, not mocked fixtures
 
 Week 7 adds federated identity via GitHub OAuth. The Week 6 contracts above remain in force; this section adds to and modifies them where noted.
 
-**`external_dependency: github.com`** — see `docs/Week7_StudyGuide.md` for the representative Authorization Code flow, access-token response, and `/user` JSON shape. This contract specifies what our code does in response to a GitHub payload. It does **not** specify GitHub's behavior; we cannot, because GitHub is not in our repo.
+**`external_dependency: github.com`** — the representative Authorization Code flow, access-token response, and `/user` JSON shape are specified in the route contracts below (§7a.13 login, §7a.14 callback, §7a.15 required provider fields). This contract specifies what our code does in response to a GitHub payload. It does **not** specify GitHub's behavior; we cannot, because GitHub is not in our repo.
 
 ### 7a.0 Part 1 required-item map
 
