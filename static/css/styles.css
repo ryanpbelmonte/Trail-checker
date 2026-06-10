@@ -45,7 +45,9 @@ main {
     box-shadow: 0 2px 8px rgba(27, 67, 50, 0.2);
 }
 
-.tc-navbar .navbar-brand {
+.tc-brand-text {
+    font-family: var(--bs-body-font-family);
+    font-size: var(--bs-navbar-brand-font-size, 1.25rem);
     font-weight: 700;
     letter-spacing: -0.02em;
 }
@@ -100,6 +102,10 @@ main {
     max-width: 240px;
     margin-left: auto;
     margin-right: auto;
+}
+
+.tc-hero-tagline {
+    color: var(--tc-primary-dark);
 }
 
 .tc-auth-card {

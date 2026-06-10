@@ -14,6 +14,8 @@
                         height="180"
                     >
 
+                    <p class="tc-brand-text tc-hero-tagline mb-4">Find your trail</p>
+
                     <h1 class="visually-hidden">Trail Checker</h1>
 
                     <form method="GET" action="/trail-checker/results">
@@ -23,8 +25,8 @@
                                 type="text"
                                 name="q"
                                 class="form-control"
-                                placeholder="Mount Rainier"
-                                aria-label="Location or trailhead"
+                                placeholder="Search by city, park, or trail"
+                                aria-label="Search by city, park, or trail"
                                 value="{{ query_text or '' }}"
                                 minlength="2"
                                 maxlength="100"

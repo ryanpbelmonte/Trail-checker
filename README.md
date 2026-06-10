@@ -52,13 +52,37 @@ We chose this project because it gives each team member a clear technical area w
 
 This project also gives us practice with real production concerns: rate limits, API keys, fallback behavior, partial failures, and clean data presentation. Those skills transfer well to many types of software projects, including backend systems, platform engineering, data tools, and public-facing web apps.
 
+## Live deployment
+
+**Production URL:** https://34.219.236.117/
+
+The deployed app runs on AWS EC2 with the Week 8 Docker stack (nginx → gunicorn → Flask → Postgres). Accept the browser warning for the self-signed TLS certificate on the public IP.
+
+**App entry point:** `GET /` renders the Trail Checker search page. `GET /trail-checker` is a legacy redirect to `/`.
+
+Register the GitHub OAuth callback for production as:
+
+`https://34.219.236.117/auth/github/callback`
+
+## Architecture (Week 8)
+
+```text
+Browser (HTTPS :443)
+  → nginx (TLS termination, static files, security headers)
+    → gunicorn (:8000, internal Docker network)
+      → Flask (routes, auth, OpenWeather integration)
+        → Postgres (persistent volume, not exposed on host)
+```
+
+See `CONTRACTS.md` for route contracts, auth rules, and API behavior.
+
 ## Running the production stack (Week 8)
 
 nginx terminates TLS and proxies to gunicorn on the internal Docker network.
 Postgres is not published to the host (§13 trust boundary).
 
 1. Copy `.env.example` to `.env` and set secrets (`SECRET_KEY`, `OPENWEATHER_API_KEY`, GitHub OAuth).
-2. Register GitHub OAuth callback: `https://localhost/auth/github/callback`
+2. Register GitHub OAuth callback for your environment (local example below; use the [live deployment URL](#live-deployment) callback on EC2).
 3. Generate a self-signed cert (one-time, not committed):
 
 ```bash
@@ -75,6 +99,8 @@ docker compose up --build -d
 ```
 
 5. Open **https://localhost** (accept the browser warning for the self-signed cert).
+
+Local GitHub OAuth callback example: `https://localhost/auth/github/callback`
 
 ### Attack-path test (nginx edge, §10)
 

@@ -122,11 +122,11 @@ Common error codes:
 | 502    | `external_api_error`       | OpenWeather returned malformed/unusable data                    |
 | 503    | `external_api_unavailable` | Timeout, rate limit, bad API key, or service unavailable        |
 
-### GET `/trail-checker`
+### GET `/`
 
 **Owner:** Client-side + server-side
 **Auth required:** No
-**Purpose:** Render the main Trail Checker search page.
+**Purpose:** Render the main Trail Checker search page (home).
 
 Request:
 
@@ -141,12 +141,24 @@ Response:
   * Search form with `method="GET"` and `action="/trail-checker/results"`.
   * Text input named `q`.
   * Submit button.
-  * Brief explanation of what data is checked.
+  * Hero illustration and tagline.
   * Link to `/saved-trails` visible in navigation for logged-in users.
 
 Errors:
 
 * None expected for normal rendering.
+
+### GET `/trail-checker`
+
+**Owner:** Client-side + server-side
+**Auth required:** No
+**Purpose:** Legacy bookmark URL; redirect to the home search page.
+
+Response:
+
+* `302 Found` redirect to `/`.
+
+**Tested by:** `tests/test_client_templates.py::test_trail_checker_legacy_path_redirects_home`.
 
 ### GET `/trail-checker/results`
 
@@ -197,6 +209,7 @@ Response:
   * `pm2_5`
   * `pm10`
   * `recommendation`
+  * `location_line` (human-readable state/country or coordinates)
   * `is_saved` boolean for logged-in users when matching saved trail exists
 
 Client-visible page requirements:
@@ -205,7 +218,7 @@ Client-visible page requirements:
 * Show weather and air quality in separate sections.
 * Show the recommendation badge: Good / Use Caution / Poor / Unknown.
 * If logged in, show a form/button to save the location.
-* If anonymous, show a message that users can log in to save locations.
+* If anonymous, show a link to `GET /login/save-location` with the searched location in query params ("Log in to save this location").
 
 Errors:
 
@@ -262,6 +275,41 @@ Errors:
 * Uses shared JSON error envelope.
 * `400`, `404`, `502`, and `503` must be handled as described above.
 
+### GET `/login/save-location`
+
+**Owner:** Server-side + DB-and-security
+**Auth required:** No
+**Purpose:** Queue an anonymous user's searched location in session, then send them to login so it can be saved after authentication.
+
+Request query parameters:
+
+| Name         | Required | Validation                       |
+| ------------ | -------- | -------------------------------- |
+| display_name | Yes      | 2-100 characters                 |
+| query_text   | Yes      | 2-100 characters                 |
+| latitude     | Yes      | Valid float between -90 and 90   |
+| longitude    | Yes      | Valid float between -180 and 180 |
+| country      | No       | Max 10 characters                |
+| state        | No       | Max 100 characters               |
+
+Server behavior:
+
+1. Validate query parameters.
+2. Store a `pending_saved_trail` dict in the server session.
+3. Redirect to `/login?next=/saved-trails`.
+
+After successful login, register, or GitHub OAuth, `_redirect_after_auth` calls `_consume_pending_saved_trail`, which saves the queued location for the authenticated user. If a queued save existed, the redirect target is `/saved-trails` (even when `?next=` pointed elsewhere).
+
+Success response:
+
+* `302 Found` redirect to `/login?next=/saved-trails`.
+
+Errors:
+
+* Invalid or missing parameters: flash message and redirect to `/`.
+
+**Tested by:** `tests/test_auth.py` (login-to-save flow).
+
 ### GET `/saved-trails`
 
 **Owner:** Client-side + DB-and-security
@@ -276,8 +324,21 @@ Response:
 
 * `200 OK`
 * Renders `templates/saved_trails.html`.
-* Template context includes `saved_trails`, ordered newest first.
-* Empty state appears when the user has no saved trails.
+* Template context includes `trail_entries`, a list of dicts ordered by latest recommendation (Good → Use Caution → Poor → Unknown), then alphabetically by `display_name` within each rating. Each entry contains:
+
+  * `trail` — the `SavedTrail` row
+  * `latest` — the most recent matching `TrailCheck` for that user/coordinates, or `None`
+  * `location_line` — human-readable place text from geocoding fields or coordinates
+
+* Empty state appears when the user has no saved trails (`data-testid="saved-trails-empty"`).
+
+Server helpers:
+
+* `_latest_trail_check_for_saved`
+* `_saved_trail_sort_key`
+* `_format_saved_location` / `_format_location_line`
+
+In-page recheck is handled by `POST /saved-trails/<trail_id>/recheck` and `static/js/saved_trails.js`.
 
 Errors:
 
@@ -312,6 +373,8 @@ Errors:
 * Duplicate saved location for same user: do not create a second row. Redirect to `/saved-trails` with a flash message explaining it was already saved.
 * Anonymous user: redirect to `/login`.
 
+When a trail is saved, `_claim_anonymous_trail_checks` assigns any anonymous `trail_checks` rows with matching latitude/longitude to the saving user so the saved-trails page can show conditions from the search they just performed. This is an MVP tradeoff documented in §8.
+
 ### POST `/saved-trails/<trail_id>/delete`
 
 **Owner:** Server-side + DB-and-security
@@ -332,11 +395,59 @@ Errors:
 * `404 Not Found`: saved trail does not exist or belongs to another user.
 * Anonymous user: redirect to `/login`.
 
+### POST `/saved-trails/<trail_id>/recheck`
+
+**Owner:** Server-side + client-side
+**Auth required:** Yes
+**Purpose:** Re-check current conditions for a saved trail and return JSON for in-page card refresh (no navigation).
+
+Request:
+
+* Path parameter `trail_id` must be an integer.
+* CSRF token required (supplied by `saved_trails.html` / `static/js/saved_trails.js`).
+
+Server behavior:
+
+1. Load saved trail via `_get_owned_saved_trail` for the current user.
+2. Call OpenWeather using stored coordinates (no geocoding).
+3. Persist a new `trail_checks` row.
+4. Return JSON snapshot via `_serialize_saved_trail_check`.
+
+Success response:
+
+* `200 OK`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "recommendation": "good",
+    "weather_main": "Clear",
+    "weather_description": "clear sky",
+    "temp_f": 62.0,
+    "wind_mph": 5.2,
+    "aqi": 2,
+    "pm2_5": 4.1,
+    "checked_at": "Jun 10, 2026 at 01:30 PM UTC",
+    "saved_at": "Jun 09, 2026"
+  }
+}
+```
+
+Errors:
+
+* Uses shared JSON error envelope (`ok: false`, `error.code`, `error.message`).
+* `404 not_found`: saved trail does not exist or belongs to another user.
+* `502 external_api_error` or `503 external_api_unavailable`: OpenWeather failure.
+* Anonymous user: redirect to `/login`.
+
+**Tested by:** `tests/test_server_conditions.py` (recheck JSON tests).
+
 ### GET `/saved-trails/<trail_id>/check`
 
 **Owner:** Server-side + client-side
 **Auth required:** Yes
-**Purpose:** Re-check current conditions for a saved trail.
+**Purpose:** Full-page re-check of a saved trail; renders the results template (e.g. bookmarked URL). The saved-trails list UI uses `POST /saved-trails/<trail_id>/recheck` instead.
 
 Request:
 
@@ -486,15 +597,16 @@ Implementation rule:
 
 Anonymous users may:
 
-* View `/` and existing skeleton public pages.
-* View `/trail-checker`.
+* View `/` (Trail Checker search page).
+* Follow legacy `GET /trail-checker` (redirects to `/`).
 * Search `/trail-checker/results?q=...`.
 * Call `/api/conditions?q=...`.
+* Start login-to-save via `GET /login/save-location` (queues save in session, then redirects to login).
 
 Anonymous users may not:
 
 * View `/saved-trails`.
-* Save a trail.
+* Save a trail directly (until authenticated).
 * Delete a saved trail.
 * Re-check a saved trail by id.
 
@@ -514,6 +626,7 @@ Logged-in users may:
 * This applies to:
 
   * `POST /saved-trails/<trail_id>/delete`
+  * `POST /saved-trails/<trail_id>/recheck`
   * `GET /saved-trails/<trail_id>/check`
 * The app should not reveal whether another user's saved trail id exists.
 
@@ -656,9 +769,10 @@ Owner: Liam, client-side.
 
 Should assert:
 
-* `/trail-checker` renders a form with `action="/trail-checker/results"`, `method="GET"`, and input named `q`.
+* `/` renders a form with `action="/trail-checker/results"`, `method="GET"`, and input named `q`.
+* `GET /trail-checker` redirects to `/` (`test_trail_checker_legacy_path_redirects_home`).
 * The Trail Checker page has a submit button.
-* The base navbar includes a link to `/trail-checker`.
+* The navbar brand links to `/` and displays `Trail Checker` (`test_base_nav_brand_links_home`). There is no separate nav link to `/trail-checker`, and About/Register links are not in the base navbar.
 * The results template includes stable selectors/classes for weather card, air quality card, and recommendation badge.
 * `/saved-trails` page has an empty-state container when no saved trails exist.
 * Tests should check structure and selectors, not exact marketing copy.
@@ -683,7 +797,7 @@ The final `e2e.md` must exercise:
 
 1. Fresh app startup with Docker Compose.
 2. Login/register flow.
-3. Anonymous Trail Checker search page.
+3. Anonymous Trail Checker search page at `/`.
 4. Real OpenWeather search with a realistic outdoor location.
 5. Real OpenWeather edge/weird query that may expose contract gaps.
 6. Logged-in save flow.
@@ -798,15 +912,18 @@ No new CSRF-exempt routes in Week 7. `/login/github` is GET-only (no body to pro
 
 Changing `users.password_hash` from `NOT NULL` to `NULL` under SQLModel's `create_all` is destructive on Postgres. The first deploy of Week 7 requires `docker compose down -v` before `docker compose up -d --build` so the `users` table is recreated with the new schema. SQLite test runs are unaffected (fresh DB per run).
 
-### 7a.12 Navbar text contract (cross-slice)
+### 7a.12 Navbar contract (cross-slice)
 
-When a user is authenticated, every Flask-rendered page must show, in the navbar:
+**Anonymous users:** navbar shows the **Trail Checker** brand (links to `/`) and a **Log in** link. About, Register, and duplicate home links are not shown.
 
-```
-Logged in as {username}
-```
+**Authenticated users:** every Flask-rendered page must show, in the navbar:
 
-followed by a Logout control. `{username}` is the literal value of `User.username` for the currently authenticated session, surfaced to templates by the `inject_user` context processor as `user.username`. No prefix, no truncation, no styling that would split the string across DOM nodes in a way that breaks a `to_contain_text` assertion.
+* **Trail Checker** brand linking to `/`
+* **Saved Trails** link
+* `Logged in as {username}`
+* **Logout** (POST form with CSRF token)
+
+`{username}` is the literal value of `User.username` for the currently authenticated session, surfaced to templates by the `inject_user` context processor as `user.username`. No prefix, no truncation, no styling that would split the string across DOM nodes in a way that breaks a `to_contain_text` assertion.
 
 Playwright e2e tests will assert this exact string. Any change to the format requires updating this contract and the affected tests in the same PR.
 
@@ -864,11 +981,11 @@ Server behavior:
 2. Call GitHub's `/user` endpoint with the token and read fields per §7a.15.
 3. Run the transactional create-or-link flow in §7a.3 against `OAuthIdentity` and `User`.
 4. Call `login_user(user)` (no `remember=True` per §7a.7) and set `session.permanent = True`.
-5. `302 Found` to `/saved-trails`.
+5. Redirect via `_redirect_after_auth`: if `pending_saved_trail` was queued (§ `/login/save-location`), consume it and redirect to `/saved-trails`; otherwise honor safe `?next=` or default to `/saved-trails`.
 
 Success response (post-callback session state):
 
-* `302 Found` redirect to `/saved-trails`.
+* `302 Found` redirect (typically `/saved-trails`).
 * Flask session cookie (HMAC-signed with `SECRET_KEY`) carries `_user_id = str(user.id)` and `_fresh = True`.
 * Cookie flags applied per §4 Week 7 block: `HttpOnly`, `SameSite=Lax`, `Secure` outside debug/testing.
 * `PERMANENT_SESSION_LIFETIME` = 12 hours per §7a.7.
@@ -931,7 +1048,8 @@ The team is deliberately punting the following:
 * No autocomplete. Search is a normal text field.
 * No advanced location disambiguation. The first geocoding result is used for MVP. A later version can let users pick from multiple results.
 * No background refresh. Conditions update only when the user searches or re-checks a saved trail.
-* No OAuth yet. Week 6 uses the skeleton login flow refactored to Flask-Login; OAuth is expected later.
+* Anonymous trail checks are adopted on save. When a user saves coordinates they searched while logged out, prior anonymous `trail_checks` for those coordinates are assigned to that user so saved-trails cards can show the search snapshot immediately.
+* OAuth is supported via GitHub (Week 7). Password login and GitHub OAuth both use `_redirect_after_auth` for post-login redirects.
 * No mobile-first polish beyond reasonable Bootstrap responsiveness.
 * No production-grade rate-limit handling. We handle OpenWeather failures gracefully, but we do not implement local caching or request throttling this week.
 * No user profile settings.
