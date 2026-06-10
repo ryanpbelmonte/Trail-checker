@@ -84,6 +84,15 @@ We chose this project because it gives each team member a clear technical area w
 
 This project also gives us practice with real production concerns: API keys, rate limits, fallback behavior, partial failures, persistent state, authentication, Docker, nginx, gunicorn, and Postgres. Those skills transfer well to many types of software projects, including backend systems, platform engineering, data tools, and public-facing web apps.
 
+## Documentation
+
+Team project docs:
+
+- [`docs/Week10_Server_Side_Final_Notes.md`](docs/Week10_Server_Side_Final_Notes.md) — Ryan (server-side): ownership, capstone integration review, architecture boundaries, and known limitations
+- [`CONTRACTS.md`](CONTRACTS.md) — route and API contracts
+- [`role_work.md`](role_work.md) — Week 7 per-role contributions
+- [`e2e/server.md`](e2e/server.md) — server-side end-to-end verification walkthrough
+
 ## Running the production stack locally
 
 nginx terminates TLS and proxies to gunicorn on the internal Docker network. Postgres is not published to the host, which keeps the database behind the Docker network boundary.

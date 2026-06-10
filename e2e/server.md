@@ -1,7 +1,7 @@
 # E2E Walk — Server-side slice
 
-**Role:** Ryan Belmonte (server-side)  
-**Team:** Cache Kings  
+**Role:** Ryan Belmonte (server-side)
+**Team:** Cache Kings
 **Scope:** OpenWeather integration and conditions routes — `/api/conditions`, `/trail-checker/results` — against a running Flask app (not pytest).
 
 ## 1. Definition
@@ -130,7 +130,7 @@ With a valid API key, expect `200` and both `data-testid` markers present.
 
 ## 4. Execution log
 
-Run date: 2026-05-21 (initial), **2026-05-21 re-run after key activation**  
+Run date: 2026-05-21 (initial), **2026-05-21 re-run after key activation**
 Environment: EC2, Docker Compose, in-container `requests` via isolated `trail-checker-e2e-app` container (host port 5000 occupied by Week 5 assignment `week_5_506-app-1`; Trail Checker uses internal port 5000 only)
 
 | Step | Result | Notes |
@@ -195,3 +195,103 @@ Live OpenWeather steps completed 2026-05-21 after key activation. If re-running 
 ## 6. Per-role note
 
 This file is the **server-side** contribution to the team `e2e.md`. Coordinator should link or merge sections from Liam (browser UI), Nick (Postgres/auth), and this doc for the whole-system walk.
+
+## 7. Capstone production verification
+
+**Run date:** 2026-06-10
+**Environment:** Live EC2 deploy at **https://34.219.236.117/** — nginx → gunicorn → Flask → Postgres (Week 8 Docker stack). TLS is self-signed (`CN=localhost`).
+**Scope:** Server-side routes and live OpenWeather on production. Full authenticated flows (register, save, recheck, delete, logout) are covered in the team browser checklist in `README.md` §Final verification; this section records what Ryan verified from the server-side lane with `curl` against the public URL.
+
+### 7.1 Setup
+
+Confirm the deploy responds over HTTPS and is the Trail Checker app (not a stale branch):
+
+```bash
+BASE="https://34.219.236.117"
+curl -skI "$BASE/" | head -3
+curl -skI "$BASE/trail-checker" | rg -i "HTTP/|location:"
+curl -skI "$BASE/test/login/alice" | head -1
+```
+
+Expect: `/` → `200`; `/trail-checker` → `302` to `/`; `/test/login/alice` → `404` (production must not expose the test backdoor).
+
+### 7.2 JSON API on production
+
+```bash
+# Invalid input
+curl -sk "$BASE/api/conditions?q=M"
+
+# Happy path — live OpenWeather (required)
+curl -sk "$BASE/api/conditions?q=Seattle" | python3 -m json.tool | head -30
+```
+
+### 7.3 HTML results on production
+
+```bash
+curl -sk "$BASE/trail-checker/results?q=Seattle" | python3 -c "
+import sys
+t = sys.stdin.read()
+print('weather-card', 'data-testid=\"weather-card\"' in t)
+print('recommendation-badge', 'data-testid=\"recommendation-badge\"' in t)
+"
+```
+
+### 7.4 Auth gate (unauthenticated)
+
+```bash
+curl -skI "$BASE/saved-trails" | rg -i "HTTP/|location:"
+curl -skL -o /dev/null -w "login_page=%{http_code}\n" "$BASE/login"
+curl -skL -o /dev/null -w "register_page=%{http_code}\n" "$BASE/register"
+```
+
+Expect: unauthenticated `GET /saved-trails` → `302` to `/login?next=%2Fsaved-trails`; login and register pages → `200` after redirect chain.
+
+### 7.5 Pass criteria
+
+| Check | Expected |
+|-------|----------|
+| HTTPS homepage | `200`, `server: nginx` |
+| `/trail-checker` | `302` → `/` |
+| `/test/login/alice` | `404` |
+| `GET /api/conditions?q=M` | `400`, `invalid_input` |
+| `GET /api/conditions?q=Seattle` | `200`, `ok: true`, weather + air_quality + recommendation |
+| `GET /trail-checker/results?q=Seattle` | `200`, weather-card + recommendation-badge testids |
+| `GET /saved-trails` (no session) | `302` → login with `next=` |
+| `GET /login`, `GET /register` | `200` (follow redirects) |
+
+Authenticated save / recheck / delete / logout: see `README.md` §Final verification (browser walk — Liam verified on deploy branch before merge to `main`).
+
+### 7.6 Execution log (2026-06-10)
+
+| Step | Result | Notes |
+|------|--------|-------|
+| 7.1 HTTPS + identity | **PASS** | `/` `200`; nginx/1.27.5; `/trail-checker` → `/` |
+| 7.1 test backdoor | **PASS** | `GET /test/login/alice` → `404` |
+| 7.2 invalid API | **PASS** | `400`, `invalid_input` for `q=M` |
+| 7.2 live OpenWeather | **PASS** | `q=Seattle` → `ok: true`, `resolved_name: Seattle`, `recommendation: good`, `aqi: 2` |
+| 7.3 HTML results | **PASS** | `200`; both `data-testid` markers present; title `Trail Checker — Seattle` |
+| 7.4 auth gate | **PASS** | `/saved-trails` → `/login?next=%2Fsaved-trails`; login/register pages `200` |
+| Auth POST via curl | **SKIP** | nginx `limit_req` on `/login` and `/register` (`5r/m`) returns `503` under rapid automated POST bursts; CSRF session pairing needs a real browser — use README browser checklist instead |
+
+### 7.7 Findings
+
+**Finding 4 — nginx auth rate limit vs automated curl**
+
+`nginx/nginx.conf` applies `limit_req zone=auth` (`5r/m`, burst 3) to `/login` and `/register`. Rapid repeated `POST` from one IP during e2e scripting can return **503** from nginx before Flask runs. This is expected hardening, not an app bug. Browser users and spaced manual checks are unaffected.
+
+**Finding 5 — Self-signed TLS on public IP**
+
+Certificate subject is `CN=localhost`. Browsers show a warning on first visit to `https://34.219.236.117/`. The deployment uses HTTPS through nginx as required by the Week 8 stack, but the certificate is self-signed, so browsers warn on the public IP. A real domain + Let's Encrypt would remove the warning.
+
+**Finding 6 — Ambiguous geocoding (unchanged from Week 6)**
+
+Production still returns the first OpenWeather geocode match (`CONTRACTS.md` §8). Short or ambiguous names may not resolve to the hiker’s intended trailhead — same lesson as Finding 3 in §4.
+
+### 7.8 Re-run checklist
+
+Before final submission, from any machine with network access to the live URL:
+
+1. Run §7.1–7.4 commands against `https://34.219.236.117/`.
+2. Confirm step 7.2 happy path returns live weather (not `503` / `external_api_unavailable`).
+3. Complete authenticated flows in a browser per `README.md` §Final verification.
+4. Space auth-route checks if you hit nginx `503` on `/login` or `/register` POST.
